@@ -31,17 +31,21 @@ export interface BacktestResult {
 }
 
 // Helper function to test a strategy with dynamic criteria
+// Helper function to test a strategy with dynamic criteria
 function testStrategy(
   candles: Candle[],
   evaluate: (i: number) => "BUY" | "SELL" | "NEUTRAL",
   initialBalance: number = 10000,
-  feePercent: number = 0.1
+  feePercent: number = 0.1,
+  trailingAtrMult: number = 0,
+  atrValues: number[] = []
 ) {
   const feeFactor = feePercent / 100;
   let balance = initialBalance;
   let position = 0;
   let inPosition = false;
   let buyPrice = 0;
+  let highestPrice = 0;
   const tradeHistory: Trade[] = [];
   let winningTrades = 0;
   let losingTrades = 0;
@@ -49,12 +53,47 @@ function testStrategy(
   for (let i = 0; i < candles.length; i++) {
     const candle = candles[i];
     const decision = evaluate(i);
+    const currentAtr = atrValues[i] || 0;
+
+    // Check for Trailing Stop exit
+    if (inPosition && trailingAtrMult > 0 && currentAtr > 0) {
+      if (candle.close > highestPrice) {
+        highestPrice = candle.close;
+      }
+      const trailingStopPrice = highestPrice - currentAtr * trailingAtrMult;
+      
+      if (candle.close < trailingStopPrice) {
+        // Trailing Stop triggered! Sell all position.
+        const grossValue = position * candle.close;
+        const fee = grossValue * feeFactor;
+        balance = grossValue - fee;
+        position = 0;
+        inPosition = false;
+
+        const tradeProfit = candle.close - buyPrice;
+        if (tradeProfit > 0) {
+          winningTrades++;
+        } else {
+          losingTrades++;
+        }
+
+        tradeHistory.push({
+          type: "SELL",
+          price: candle.close,
+          time: candle.time,
+          balance: balance,
+        });
+        
+        continue; // Close position and skip evaluate loop
+      }
+    }
 
     if (decision === "BUY" && !inPosition) {
       const cost = balance * feeFactor;
       const netBalance = balance - cost;
       position = netBalance / candle.close;
       buyPrice = candle.close;
+      highestPrice = candle.close;
       balance = 0;
       inPosition = true;
       tradeHistory.push({
@@ -691,6 +730,7 @@ export function runBacktest(
   let currentSellThreshold = -2;
   let currentSlMult = 1.5;
   let currentTpMult = 3.0;
+  let currentTrailingMult = 2.0;
 
   // Helper to mutate parameters in a range
   const mutateParam = (val: number, min: number, max: number, step: number): number => {
@@ -703,7 +743,7 @@ export function runBacktest(
   const evaluateAgent = (
     os: number, ob: number, fast: number, slow: number, 
     bbP: number, bbM: number, mFast: number, mSlow: number, mSig: number,
-    buyT: number, sellT: number
+    buyT: number, sellT: number, trailingM: number
   ) => {
     const rsiV = calculateRSI(prices, 14);
     const emaF = calculateEMA(prices, fast);
@@ -734,14 +774,14 @@ export function runBacktest(
       return "NEUTRAL";
     };
 
-    return testStrategy(candles, evalFn, initialBalance, feePercent);
+    return testStrategy(candles, evalFn, initialBalance, feePercent, trailingM, atr);
   };
 
   // Run initial evaluation
   let bestTrainedStats = evaluateAgent(
     currentOS, currentOB, currentEmaFast, currentEmaSlow,
     currentBbPeriod, currentBbMult, currentMacdFast, currentMacdSlow, currentMacdSignal,
-    currentBuyThreshold, currentSellThreshold
+    currentBuyThreshold, currentSellThreshold, currentTrailingMult
   );
   let bestTrainedProfit = bestTrainedStats.netProfit;
 
@@ -763,11 +803,12 @@ export function runBacktest(
     const tempMSig = mutateParam(currentMacdSignal, 5, 12, 1);
     const tempBuyT = mutateParam(currentBuyThreshold, 1, 3, 1);
     const tempSellT = mutateParam(currentSellThreshold, -3, -1, 1);
+    const tempTrailingM = mutateParam(currentTrailingMult, 1.0, 4.0, 0.1);
 
     const stats = evaluateAgent(
       tempOS, tempOB, tempFast, tempSlow,
       tempBbP, tempBbM, tempMFast, tempMSlow, tempMSig,
-      tempBuyT, tempSellT
+      tempBuyT, tempSellT, tempTrailingM
     );
 
     if (stats.netProfit > bestTrainedProfit && stats.totalTrades > 0) {
@@ -784,6 +825,7 @@ export function runBacktest(
       currentMacdSignal = tempMSig;
       currentBuyThreshold = tempBuyT;
       currentSellThreshold = tempSellT;
+      currentTrailingMult = tempTrailingM;
     }
   }
 
@@ -855,6 +897,7 @@ export function runBacktest(
       Sell_Esik: currentSellThreshold,
       SL_ATR: currentSlMult,
       TP_ATR: currentTpMult,
+      IzSurenStop_ATR: currentTrailingMult,
     },
     stopLoss: trainedStopLoss,
     takeProfit: trainedTakeProfit,
