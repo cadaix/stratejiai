@@ -86,6 +86,7 @@ export default function SignalPanel({
     "1w": "Haftalık",
     "1M": "Aylık",
     "1y": "Yıllık (Simüle)",
+    "5y": "5 Yıllık (Günlük)",
   };
 
   return (

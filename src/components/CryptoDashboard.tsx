@@ -18,7 +18,7 @@ const SYMBOLS = [
   "XRP/USDT",
   "DOGE/USDT",
 ];
-const TIMEFRAMES = ["15m", "1h", "4h", "1d", "1w", "1M", "1y"];
+const TIMEFRAMES = ["15m", "1h", "4h", "1d", "1w", "1M", "1y", "5y"];
 
 export default function CryptoDashboard() {
   const [selectedSymbol, setSelectedSymbol] = useState("BTC/USDT");
@@ -103,6 +103,7 @@ export default function CryptoDashboard() {
                 "1w": "Haf",
                 "1M": "Ay",
                 "1y": "Yıl (Sim.)",
+                "5y": "5 Yıl (Gün)",
               };
               return (
                 <button

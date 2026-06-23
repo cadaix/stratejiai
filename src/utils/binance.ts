@@ -17,34 +17,67 @@ export async function fetchCandles(
 
   // If interval is yearly, fetch 1M and aggregate it
   const isYearly = interval === "1y";
-  const fetchInterval = isYearly ? "1M" : interval;
-  // If yearly, we need more history to construct yearly candles (e.g. 1000 months is ~83 years, but Binance max is ~1000 anyway)
-  const fetchLimit = isYearly ? 1000 : limit;
+  const isFiveYears = interval === "5y";
+  const fetchInterval = isYearly ? "1M" : (isFiveYears ? "1d" : interval);
+  
+  // If yearly, we need 1000 candles to aggregate. If 5-year daily backtest, we need ~1825 candles.
+  const targetLimit = isYearly ? 1000 : (isFiveYears ? 1825 : limit);
 
-  const url = `https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=${fetchInterval}&limit=${fetchLimit}`;
+  let allCandles: Candle[] = [];
+  let endTime: number | null = null;
 
   try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Binance API error: ${res.statusText}`);
+    while (allCandles.length < targetLimit) {
+      const currentBatchLimit = Math.min(1000, targetLimit - allCandles.length);
+      let url = `https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=${fetchInterval}&limit=${currentBatchLimit}`;
+      if (endTime !== null) {
+        url += `&endTime=${endTime}`;
+      }
+
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Binance API error: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) {
+        break;
+      }
+
+      const candles: Candle[] = data.map((item: any) => ({
+        time: Math.floor(Number(item[0]) / 1000), // convert ms to seconds
+        open: Number(item[1]),
+        high: Number(item[2]),
+        low: Number(item[3]),
+        close: Number(item[4]),
+        volume: Number(item[5]),
+      }));
+
+      // Prepend the older candles to our list
+      allCandles = [...candles, ...allCandles];
+
+      const oldestTimeMs = Number(data[0][0]);
+      if (endTime !== null && oldestTimeMs >= endTime) {
+        break; // safety check to prevent infinite loop
+      }
+      endTime = oldestTimeMs - 1;
+
+      // If we received fewer candles than we asked for, it means we reached the beginning of history
+      if (data.length < currentBatchLimit) {
+        break;
+      }
     }
 
-    const data = await res.json();
-    
-    const candles: Candle[] = data.map((item: any) => ({
-      time: Math.floor(Number(item[0]) / 1000), // convert ms to seconds
-      open: Number(item[1]),
-      high: Number(item[2]),
-      low: Number(item[3]),
-      close: Number(item[4]),
-      volume: Number(item[5]),
-    }));
+    // Deduplicate and sort
+    const uniqueMap = new Map<number, Candle>();
+    allCandles.forEach((c) => uniqueMap.set(c.time, c));
+    const sortedCandles = Array.from(uniqueMap.values()).sort((a, b) => a.time - b.time);
 
     if (isYearly) {
-      return aggregateToYearly(candles);
+      return aggregateToYearly(sortedCandles);
     }
 
-    return candles;
+    return sortedCandles;
   } catch (error) {
     console.error("Error fetching candles from Binance:", error);
     throw error;
