@@ -73,7 +73,7 @@ export default function CryptoDashboard() {
         </div>
         <div className="header-status">
           {/* Symbol Selectors */}
-          <div className="tabs-container" style={{ flexWrap: "wrap" }}>
+          <div className="tabs-container">
             {SYMBOLS.map((sym) => (
               <button
                 key={sym}
@@ -93,7 +93,7 @@ export default function CryptoDashboard() {
           <span style={{ fontSize: "0.95rem", fontWeight: 600, color: "var(--text-secondary)" }}>
             Zaman Dilimi:
           </span>
-          <div className="tabs-container" style={{ flexWrap: "wrap" }}>
+          <div className="tabs-container">
             {TIMEFRAMES.map((tf) => {
               const labelMap: { [key: string]: string } = {
                 "15m": "15dk",

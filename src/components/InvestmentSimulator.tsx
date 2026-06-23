@@ -69,7 +69,7 @@ export default function InvestmentSimulator({ results, symbol }: InvestmentSimul
         >
           Yatırım Miktarı (USD)
         </label>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="simulator-input-container" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <div
             style={{
               position: "relative",
@@ -115,31 +115,33 @@ export default function InvestmentSimulator({ results, symbol }: InvestmentSimul
             />
           </div>
           {/* Quick Presets */}
-          {presets.map((preset) => (
-            <button
-              key={preset}
-              onClick={() => setInvestment(String(preset))}
-              className="btn btn-secondary"
-              style={{
-                padding: "0.5rem 0.75rem",
-                fontSize: "0.8rem",
-                borderColor:
-                  investmentAmount === preset
-                    ? "var(--accent-primary)"
-                    : "var(--border-color)",
-                background:
-                  investmentAmount === preset
-                    ? "rgba(99, 102, 241, 0.1)"
-                    : undefined,
-                color:
-                  investmentAmount === preset
-                    ? "var(--accent-primary)"
-                    : undefined,
-              }}
-            >
-              ${preset >= 1000 ? `${preset / 1000}K` : preset}
-            </button>
-          ))}
+          <div className="simulator-presets" style={{ display: "flex", gap: "0.5rem" }}>
+            {presets.map((preset) => (
+              <button
+                key={preset}
+                onClick={() => setInvestment(String(preset))}
+                className="btn btn-secondary"
+                style={{
+                  padding: "0.5rem 0.75rem",
+                  fontSize: "0.8rem",
+                  borderColor:
+                    investmentAmount === preset
+                      ? "var(--accent-primary)"
+                      : "var(--border-color)",
+                  background:
+                    investmentAmount === preset
+                      ? "rgba(99, 102, 241, 0.1)"
+                      : undefined,
+                  color:
+                    investmentAmount === preset
+                      ? "var(--accent-primary)"
+                      : undefined,
+                }}
+              >
+                ${preset >= 1000 ? `${preset / 1000}K` : preset}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
