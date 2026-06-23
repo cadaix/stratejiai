@@ -285,9 +285,11 @@ export default function SignalPanel({
                 border: "1px solid var(--border-color)",
               }}
             >
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>{res.strategyName.split(" ")[0]}</span>
-                <span style={{ fontSize: "0.7rem", color: "var(--text-secondary)" }}>
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1, marginRight: "0.5rem" }}>
+                <span style={{ fontSize: "0.85rem", fontWeight: 600, wordBreak: "break-word", whiteSpace: "normal" }}>
+                  {res.strategyName}
+                </span>
+                <span style={{ fontSize: "0.7rem", color: "var(--text-secondary)", wordBreak: "break-word", whiteSpace: "normal" }}>
                   {Object.entries(res.indicatorValues)
                     .map(([k, v]) => `${k}: ${v}`)
                     .join(", ")}

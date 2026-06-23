@@ -87,8 +87,10 @@ export default function BacktestPanel({ results }: BacktestPanelProps) {
                       </span>
                     </td>
                     <td>
-                      <div style={{ display: "flex", flexDirection: "column" }}>
-                        <span style={{ fontWeight: 600, fontSize: "0.95rem" }}>{res.strategyName}</span>
+                      <div style={{ display: "flex", flexDirection: "column", minWidth: "120px" }}>
+                        <span style={{ fontWeight: 600, fontSize: "0.85rem", wordBreak: "break-word", whiteSpace: "normal" }}>
+                          {res.strategyName}
+                        </span>
                         {isBest && (
                           <span style={{ fontSize: "0.7rem", color: "var(--color-buy)", fontWeight: 500 }}>
                             &bull; En İyi Algoritma (Seçildi)
