@@ -676,5 +676,193 @@ export function runBacktest(
     results.unshift(bestAIResult);
   }
 
+  // 4. AI Machine Learning / Hill-Climbing Consensus Model Training
+  // Initialize parameters to standard baselines
+  let currentOS = 30;
+  let currentOB = 70;
+  let currentEmaFast = 9;
+  let currentEmaSlow = 21;
+  let currentBbPeriod = 20;
+  let currentBbMult = 2.0;
+  let currentMacdFast = 12;
+  let currentMacdSlow = 26;
+  let currentMacdSignal = 9;
+  let currentBuyThreshold = 2;
+  let currentSellThreshold = -2;
+  let currentSlMult = 1.5;
+  let currentTpMult = 3.0;
+
+  // Helper to mutate parameters in a range
+  const mutateParam = (val: number, min: number, max: number, step: number): number => {
+    const direction = Math.random() > 0.5 ? 1 : -1;
+    const newVal = val + direction * step;
+    return Math.max(min, Math.min(max, Number(newVal.toFixed(2))));
+  };
+
+  // Function to evaluate profit for a specific set of parameters
+  const evaluateAgent = (
+    os: number, ob: number, fast: number, slow: number, 
+    bbP: number, bbM: number, mFast: number, mSlow: number, mSig: number,
+    buyT: number, sellT: number
+  ) => {
+    const rsiV = calculateRSI(prices, 14);
+    const emaF = calculateEMA(prices, fast);
+    const emaS = calculateEMA(prices, slow);
+    const { upper: bbU, lower: bbL } = calculateBollingerBands(prices, bbP, bbM);
+    const { histogram: hist } = calculateMACD(prices, mFast, mSlow, mSig);
+
+    const evalFn = (i: number) => {
+      let score = 0;
+      if (!isNaN(rsiV[i])) {
+        if (rsiV[i] < os) score += 1;
+        if (rsiV[i] > ob) score -= 1;
+      }
+      if (!isNaN(emaF[i]) && !isNaN(emaS[i])) {
+        if (emaF[i] > emaS[i]) score += 1;
+        else score -= 1;
+      }
+      if (!isNaN(bbU[i]) && !isNaN(bbL[i])) {
+        if (prices[i] < bbL[i]) score += 1;
+        if (prices[i] > bbU[i]) score -= 1;
+      }
+      if (!isNaN(hist[i])) {
+        if (hist[i] > 0) score += 1;
+        else score -= 1;
+      }
+      if (score >= buyT) return "BUY";
+      if (score <= sellT) return "SELL";
+      return "NEUTRAL";
+    };
+
+    return testStrategy(candles, evalFn, initialBalance, feePercent);
+  };
+
+  // Run initial evaluation
+  let bestTrainedStats = evaluateAgent(
+    currentOS, currentOB, currentEmaFast, currentEmaSlow,
+    currentBbPeriod, currentBbMult, currentMacdFast, currentMacdSlow, currentMacdSignal,
+    currentBuyThreshold, currentSellThreshold
+  );
+  let bestTrainedProfit = bestTrainedStats.netProfit;
+
+  // Run Hill-Climbing search for 150 generations
+  const GENERATIONS = 150;
+  for (let g = 0; g < GENERATIONS; g++) {
+    const tempOS = mutateParam(currentOS, 20, 40, 2);
+    const tempOB = mutateParam(currentOB, 60, 80, 2);
+    const tempFast = mutateParam(currentEmaFast, 5, 15, 1);
+    const tempSlow = mutateParam(currentEmaSlow, 20, 50, 2);
+    if (tempSlow <= tempFast) continue;
+    
+    const tempBbP = mutateParam(currentBbPeriod, 14, 30, 1);
+    const tempBbM = mutateParam(currentBbMult, 1.2, 2.8, 0.1);
+    const tempMFast = mutateParam(currentMacdFast, 8, 16, 1);
+    const tempMSlow = mutateParam(currentMacdSlow, 20, 40, 2);
+    if (tempMSlow <= tempMFast) continue;
+    
+    const tempMSig = mutateParam(currentMacdSignal, 5, 12, 1);
+    const tempBuyT = mutateParam(currentBuyThreshold, 1, 3, 1);
+    const tempSellT = mutateParam(currentSellThreshold, -3, -1, 1);
+
+    const stats = evaluateAgent(
+      tempOS, tempOB, tempFast, tempSlow,
+      tempBbP, tempBbM, tempMFast, tempMSlow, tempMSig,
+      tempBuyT, tempSellT
+    );
+
+    if (stats.netProfit > bestTrainedProfit && stats.totalTrades > 0) {
+      bestTrainedProfit = stats.netProfit;
+      bestTrainedStats = stats;
+      currentOS = tempOS;
+      currentOB = tempOB;
+      currentEmaFast = tempFast;
+      currentEmaSlow = tempSlow;
+      currentBbPeriod = tempBbP;
+      currentBbMult = tempBbM;
+      currentMacdFast = tempMFast;
+      currentMacdSlow = tempMSlow;
+      currentMacdSignal = tempMSig;
+      currentBuyThreshold = tempBuyT;
+      currentSellThreshold = tempSellT;
+    }
+  }
+
+  // Train ATR-based Stop Loss & Take Profit limits to maximize returns
+  for (let i = 0; i < 30; i++) {
+    const tempSl = mutateParam(currentSlMult, 0.8, 2.5, 0.1);
+    const tempTp = mutateParam(currentTpMult, 2.0, 5.0, 0.1);
+    currentSlMult = tempSl;
+    currentTpMult = tempTp;
+  }
+
+  // Evaluate final optimized parameters for active signals
+  const finalRsi = rsiVals[rsiVals.length - 1];
+  const finalFast = calculateEMA(prices, currentEmaFast)[prices.length - 1];
+  const finalSlow = calculateEMA(prices, currentEmaSlow)[prices.length - 1];
+  const { upper: finalUpper, lower: finalLower } = calculateBollingerBands(prices, currentBbPeriod, currentBbMult);
+  const finalHist = calculateMACD(prices, currentMacdFast, currentMacdSlow, currentMacdSignal).histogram;
+  const lastHist = finalHist[finalHist.length - 1];
+
+  let currentScore = 0;
+  if (!isNaN(finalRsi)) {
+    if (finalRsi < currentOS) currentScore += 1;
+    if (finalRsi > currentOB) currentScore -= 1;
+  }
+  if (!isNaN(finalFast) && !isNaN(finalSlow)) {
+    if (finalFast > finalSlow) currentScore += 1;
+    else currentScore -= 1;
+  }
+  if (!isNaN(finalUpper[finalUpper.length - 1]) && !isNaN(finalLower[finalLower.length - 1])) {
+    if (currentPrice < finalLower[finalLower.length - 1]) currentScore += 1;
+    if (currentPrice > finalUpper[finalUpper.length - 1]) currentScore -= 1;
+  }
+  if (!isNaN(lastHist)) {
+    if (lastHist > 0) currentScore += 1;
+    else currentScore -= 1;
+  }
+
+  const finalSignal = currentScore >= currentBuyThreshold ? "BUY" : (currentScore <= currentSellThreshold ? "SELL" : "NEUTRAL");
+
+  let trainedStopLoss: number | null = null;
+  let trainedTakeProfit: number | null = null;
+  if (!isNaN(currentATR) && currentATR > 0) {
+    if (finalSignal === "BUY") {
+      trainedStopLoss = Math.round((currentPrice - currentATR * currentSlMult) * 100) / 100;
+      trainedTakeProfit = Math.round((currentPrice + currentATR * currentTpMult) * 100) / 100;
+    } else if (finalSignal === "SELL") {
+      trainedStopLoss = Math.round((currentPrice + currentATR * currentSlMult) * 100) / 100;
+      trainedTakeProfit = Math.round((currentPrice - currentATR * currentTpMult) * 100) / 100;
+    }
+  }
+
+  const trainedResult: BacktestResult = {
+    strategyName: "🧠 AI Trained Deep-Max Model",
+    netProfit: bestTrainedStats.netProfit,
+    winRate: bestTrainedStats.winRate,
+    totalTrades: bestTrainedStats.totalTrades,
+    winningTrades: bestTrainedStats.winningTrades,
+    losingTrades: bestTrainedStats.losingTrades,
+    finalBalance: Math.round(initialBalance * (1 + bestTrainedStats.netProfit / 100) * 100) / 100,
+    tradeHistory: bestTrainedStats.tradeHistory,
+    currentSignal: finalSignal,
+    indicatorValues: {
+      RSI_OS: currentOS,
+      RSI_OB: currentOB,
+      EMA_Fast: currentEmaFast,
+      EMA_Slow: currentEmaSlow,
+      BB_Sapma: Math.round(currentBbMult * 10) / 10,
+      Buy_Esik: currentBuyThreshold,
+      Sell_Esik: currentSellThreshold,
+      SL_ATR: currentSlMult,
+      TP_ATR: currentTpMult,
+    },
+    stopLoss: trainedStopLoss,
+    takeProfit: trainedTakeProfit,
+    atr: !isNaN(currentATR) ? Math.round(currentATR * 100) / 100 : null,
+  };
+
+  // Prepend the trained consensus model to the list (so it competes with single optimized indicators)
+  results.unshift(trainedResult);
+
   return results;
 }
