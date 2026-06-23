@@ -69,7 +69,7 @@ export default function CryptoDashboard() {
       <header className="app-header">
         <div className="brand">
           <Cpu className="logo-icon" size={28} />
-          <h1>Trade Hub AI</h1>
+          <h1>Selahattin Serkan Bayar</h1>
         </div>
         <div className="header-status">
           {/* Symbol Selectors */}
