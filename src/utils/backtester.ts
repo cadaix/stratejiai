@@ -374,7 +374,7 @@ export function runBacktest(
           totalTrades: stats.totalTrades,
           winningTrades: stats.winningTrades,
           losingTrades: stats.losingTrades,
-          finalBalance: Math.round(10000 * (1 + stats.netProfit / 100) * 100) / 100,
+          finalBalance: Math.round(initialBalance * (1 + stats.netProfit / 100) * 100) / 100,
           tradeHistory: stats.tradeHistory,
           currentSignal,
           indicatorValues: {
@@ -430,7 +430,7 @@ export function runBacktest(
           totalTrades: stats.totalTrades,
           winningTrades: stats.winningTrades,
           losingTrades: stats.losingTrades,
-          finalBalance: Math.round(10000 * (1 + stats.netProfit / 100) * 100) / 100,
+          finalBalance: Math.round(initialBalance * (1 + stats.netProfit / 100) * 100) / 100,
           tradeHistory: stats.tradeHistory,
           currentSignal,
           indicatorValues: {
@@ -485,7 +485,7 @@ export function runBacktest(
           totalTrades: stats.totalTrades,
           winningTrades: stats.winningTrades,
           losingTrades: stats.losingTrades,
-          finalBalance: Math.round(10000 * (1 + stats.netProfit / 100) * 100) / 100,
+          finalBalance: Math.round(initialBalance * (1 + stats.netProfit / 100) * 100) / 100,
           tradeHistory: stats.tradeHistory,
           currentSignal,
           indicatorValues: {
@@ -542,7 +542,7 @@ export function runBacktest(
             totalTrades: stats.totalTrades,
             winningTrades: stats.winningTrades,
             losingTrades: stats.losingTrades,
-            finalBalance: Math.round(10000 * (1 + stats.netProfit / 100) * 100) / 100,
+            finalBalance: Math.round(initialBalance * (1 + stats.netProfit / 100) * 100) / 100,
             tradeHistory: stats.tradeHistory,
             currentSignal,
             indicatorValues: {
@@ -555,6 +555,118 @@ export function runBacktest(
             atr: !isNaN(currentATR) ? Math.round(currentATR * 100) / 100 : null,
           };
         }
+      }
+    }
+  }
+
+  // 3e. RSI + Bollinger Combo Grid Search (Combo 1)
+  for (const os of [25, 30, 35]) {
+    for (const ob of [65, 70, 75]) {
+      for (const m of [1.5, 2.0]) {
+        const { upper, lower } = calculateBollingerBands(prices, 20, m);
+        const evalFn = (i: number) => {
+          if (isNaN(rsiVals[i]) || isNaN(lower[i]) || isNaN(upper[i])) return "NEUTRAL";
+          if (rsiVals[i] < os && prices[i] < lower[i]) return "BUY";
+          if (rsiVals[i] > ob || prices[i] > upper[i]) return "SELL";
+          return "NEUTRAL";
+        };
+        const stats = testStrategy(candles, evalFn, initialBalance, feePercent);
+        if (stats.netProfit > bestAIProfit && stats.totalTrades > 0) {
+          bestAIProfit = stats.netProfit;
+          const lastRSI = rsiVals[rsiVals.length - 1];
+          const lastPrice = prices[prices.length - 1];
+          const lastLower = lower[lower.length - 1];
+          const lastUpper = upper[upper.length - 1];
+          const currentSignal = (lastRSI < os && lastPrice < lastLower) ? "BUY" : ((lastRSI > ob || lastPrice > lastUpper) ? "SELL" : "NEUTRAL");
+
+          let stopLoss: number | null = null;
+          let takeProfit: number | null = null;
+          if (!isNaN(currentATR) && currentATR > 0) {
+            if (currentSignal === "BUY") {
+              stopLoss = Math.round((currentPrice - currentATR * 1.5) * 100) / 100;
+              takeProfit = Math.round((currentPrice + currentATR * 3) * 100) / 100;
+            } else if (currentSignal === "SELL") {
+              stopLoss = Math.round((currentPrice + currentATR * 1.5) * 100) / 100;
+              takeProfit = Math.round((currentPrice - currentATR * 3) * 100) / 100;
+            }
+          }
+
+          bestAIResult = {
+            strategyName: `⚡ AI Opt. RSI+BB Combo (OS:${os}/OB:${ob}/Dev:${m})`,
+            netProfit: stats.netProfit,
+            winRate: stats.winRate,
+            totalTrades: stats.totalTrades,
+            winningTrades: stats.winningTrades,
+            losingTrades: stats.losingTrades,
+            finalBalance: Math.round(initialBalance * (1 + stats.netProfit / 100) * 100) / 100,
+            tradeHistory: stats.tradeHistory,
+            currentSignal,
+            indicatorValues: {
+              RSI: Math.round(lastRSI * 100) / 100,
+              BB_Ust: Math.round(lastUpper * 100) / 100,
+              BB_Alt: Math.round(lastLower * 100) / 100,
+            },
+            stopLoss,
+            takeProfit,
+            atr: !isNaN(currentATR) ? Math.round(currentATR * 100) / 100 : null,
+          };
+        }
+      }
+    }
+  }
+
+  // 3f. EMA + MACD Crossover Combo Grid Search (Combo 2)
+  for (const fast of [9, 12]) {
+    const emaF = calculateEMA(prices, fast);
+    for (const slow of [21, 26]) {
+      if (slow <= fast) continue;
+      const emaS = calculateEMA(prices, slow);
+      const { histogram: hist } = calculateMACD(prices, 12, 26, 9);
+      const evalFn = (i: number) => {
+        if (isNaN(emaF[i]) || isNaN(emaS[i]) || isNaN(hist[i])) return "NEUTRAL";
+        if (emaF[i] > emaS[i] && hist[i] > 0) return "BUY";
+        if (emaF[i] < emaS[i] || hist[i] < 0) return "SELL";
+        return "NEUTRAL";
+      };
+      const stats = testStrategy(candles, evalFn, initialBalance, feePercent);
+      if (stats.netProfit > bestAIProfit && stats.totalTrades > 0) {
+        bestAIProfit = stats.netProfit;
+        const lastFast = emaF[emaF.length - 1];
+        const lastSlow = emaS[emaS.length - 1];
+        const lastHist = hist[hist.length - 1];
+        const currentSignal = (lastFast > lastSlow && lastHist > 0) ? "BUY" : "SELL";
+
+        let stopLoss: number | null = null;
+        let takeProfit: number | null = null;
+        if (!isNaN(currentATR) && currentATR > 0) {
+          if (currentSignal === "BUY") {
+            stopLoss = Math.round((currentPrice - currentATR * 1.5) * 100) / 100;
+            takeProfit = Math.round((currentPrice + currentATR * 3) * 100) / 100;
+          } else if (currentSignal === "SELL") {
+            stopLoss = Math.round((currentPrice + currentATR * 1.5) * 100) / 100;
+            takeProfit = Math.round((currentPrice - currentATR * 3) * 100) / 100;
+          }
+        }
+
+        bestAIResult = {
+          strategyName: `⚡ AI Opt. EMA+MACD Combo (${fast}/${slow})`,
+          netProfit: stats.netProfit,
+          winRate: stats.winRate,
+          totalTrades: stats.totalTrades,
+          winningTrades: stats.winningTrades,
+          losingTrades: stats.losingTrades,
+          finalBalance: Math.round(initialBalance * (1 + stats.netProfit / 100) * 100) / 100,
+          tradeHistory: stats.tradeHistory,
+          currentSignal,
+          indicatorValues: {
+            [`EMA_${fast}`]: Math.round(lastFast * 100) / 100,
+            [`EMA_${slow}`]: Math.round(lastSlow * 100) / 100,
+            Histogram: Math.round(lastHist * 1000) / 1000,
+          },
+          stopLoss,
+          takeProfit,
+          atr: !isNaN(currentATR) ? Math.round(currentATR * 100) / 100 : null,
+        };
       }
     }
   }

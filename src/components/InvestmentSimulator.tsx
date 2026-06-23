@@ -10,7 +10,7 @@ interface InvestmentSimulatorProps {
 }
 
 export default function InvestmentSimulator({ results, symbol }: InvestmentSimulatorProps) {
-  const [investment, setInvestment] = useState<string>("1000");
+  const [investment, setInvestment] = useState<string>("10000");
 
   const investmentAmount = parseFloat(investment) || 0;
 
