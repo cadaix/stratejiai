@@ -52,16 +52,20 @@ export default function CryptoDashboard() {
       setLeverageResults(levResults);
 
       setLastUpdated(new Date());
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || "Binance veri akışında bir hata oluştu.");
+      const errorMessage = err instanceof Error ? err.message : "Binance veri akışında bir hata oluştu.";
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
   }, [selectedSymbol, selectedTimeframe]);
 
   useEffect(() => {
-    loadData();
+    const timer = setTimeout(() => {
+      loadData();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [loadData]);
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;

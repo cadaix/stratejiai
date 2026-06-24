@@ -7,6 +7,7 @@ import {
   LineStyle,
   CandlestickSeries,
   createSeriesMarkers,
+  Time,
 } from "lightweight-charts";
 import { Candle } from "../utils/binance";
 import { Trade } from "../utils/backtester";
@@ -75,7 +76,7 @@ export default function TradingChart({ data, trades, symbol, timeframe }: Tradin
     const sortedData = [...data].sort((a, b) => a.time - b.time);
 
     const chartData = sortedData.map((c) => ({
-      time: c.time as any,
+      time: c.time as Time,
       open: c.open,
       high: c.high,
       low: c.low,
@@ -88,16 +89,16 @@ export default function TradingChart({ data, trades, symbol, timeframe }: Tradin
     const validTimes = new Set(chartData.map((d) => d.time));
 
     const markers = trades
-      .filter((t) => validTimes.has(t.time as any))
+      .filter((t) => validTimes.has(t.time as Time))
       .map((t) => ({
-        time: t.time as any,
+        time: t.time as Time,
         position: (t.type === "BUY" ? "belowBar" : "aboveBar") as "belowBar" | "aboveBar",
         color: t.type === "BUY" ? "#10b981" : "#ef4444",
         shape: (t.type === "BUY" ? "arrowUp" : "arrowDown") as "arrowUp" | "arrowDown",
         text: t.type === "BUY" ? "AL" : "SAT",
         size: 1.2,
       }))
-      .sort((a, b) => (a.time as number) - (b.time as number));
+      .sort((a, b) => (a.time as unknown as number) - (b.time as unknown as number));
 
     if (markers.length > 0) {
       createSeriesMarkers(candlestickSeries, markers);

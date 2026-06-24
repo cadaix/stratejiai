@@ -187,8 +187,8 @@ export function calculateHeikinAshi(candles: Candle[]): HeikinAshiCandle[] {
   // First candle initialization
   let prevOpen = (candles[0].open + candles[0].close) / 2;
   let prevClose = (candles[0].open + candles[0].high + candles[0].low + candles[0].close) / 4;
-  let prevHigh = Math.max(candles[0].high, prevOpen, prevClose);
-  let prevLow = Math.min(candles[0].low, prevOpen, prevClose);
+  const prevHigh = Math.max(candles[0].high, prevOpen, prevClose);
+  const prevLow = Math.min(candles[0].low, prevOpen, prevClose);
 
   haCandles.push({
     time: candles[0].time,

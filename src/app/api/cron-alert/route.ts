@@ -5,7 +5,7 @@ import { runBacktest } from "@/utils/backtester";
 const SYMBOLS = ["BTC/USDT", "SOL/USDT"];
 const TIMEFRAMES = ["1h", "1d", "1w"];
 
-function buildCommentary(timeframeLabel: string, price: number, ind: any): string {
+function buildCommentary(timeframeLabel: string, price: number, ind: Record<string, number | undefined>): string {
   if (!ind) {
     return `• *${timeframeLabel}:* Fiyat: $${price.toLocaleString("en-US", { minimumFractionDigits: 2 })}, Teknik veriler yüklenemedi.`;
   }
@@ -18,8 +18,6 @@ function buildCommentary(timeframeLabel: string, price: number, ind: any): strin
   const macdHist = ind.MACD_Histogram || 0;
   const haClose = ind.HA_Close || price;
   const haOpen = ind.HA_Open || price;
-  const tenkan = ind.Tenkan_Deger || price;
-  const kijun = ind.Kijun_Deger || price;
   const spanA = ind.SenkouA_Deger || price;
   const spanB = ind.SenkouB_Deger || price;
 
@@ -91,8 +89,9 @@ export async function GET(request: Request) {
         const errorText = await response.text();
         return NextResponse.json({ status: "Failed", error: `Telegram API error: ${errorText}` }, { status: 400 });
       }
-    } catch (err: any) {
-      return NextResponse.json({ status: "Failed", error: err.message }, { status: 500 });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      return NextResponse.json({ status: "Failed", error: errorMessage }, { status: 500 });
     }
   }
 
@@ -106,7 +105,7 @@ export async function GET(request: Request) {
   let reportMessage = `*🤖 Trade Hub AI Piyasa Yorum Raporu*\n`;
   reportMessage += `📅 Tarih/Saat: ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}\n\n`;
 
-  const signalsSent: any[] = [];
+  const signalsSent: { symbol: string; timeframe: string; signal: "BUY" | "SELL" | "NEUTRAL" }[] = [];
 
   for (const symbol of processedSymbols) {
     reportMessage += `*🪙 ${symbol} Analizi*\n`;
@@ -146,7 +145,7 @@ export async function GET(request: Request) {
           activeSignals.push(signalDesc);
           signalsSent.push({ symbol, timeframe, signal: aiModel.currentSignal });
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error(`Error processing alert for ${symbol} on ${timeframe}:`, err);
         reportMessage += `• *${timeframeLabels[timeframe]}:* Analiz sırasında hata oluştu.\n`;
       }
@@ -179,9 +178,10 @@ export async function GET(request: Request) {
       console.error(`Failed to send consolidated report to Telegram: ${errorText}`);
       return NextResponse.json({ status: "Failed", error: `Telegram API error: ${errorText}` }, { status: 400 });
     }
-  } catch (err: any) {
+  } catch (err) {
     console.error("Error sending message to Telegram:", err);
-    return NextResponse.json({ status: "Failed", error: err.message }, { status: 500 });
+    const errorMessage = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json({ status: "Failed", error: errorMessage }, { status: 500 });
   }
 
   return NextResponse.json({ status: "Success", signalsSent });

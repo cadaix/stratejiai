@@ -44,7 +44,7 @@ export async function fetchCandles(
         break;
       }
 
-      const candles: Candle[] = data.map((item: any) => ({
+      const candles: Candle[] = data.map((item: (string | number)[]) => ({
         time: Math.floor(Number(item[0]) / 1000), // convert ms to seconds
         open: Number(item[1]),
         high: Number(item[2]),

@@ -46,16 +46,20 @@ export default function SignalPanel({
         setTgStatus("error");
         setTgResponse(data.error || "Bilinmeyen bir hata oluştu.");
       }
-    } catch (err: any) {
+    } catch (err) {
       setTgStatus("error");
-      setTgResponse("API isteği başarısız oldu: " + err.message);
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      setTgResponse("API isteği başarısız oldu: " + errorMessage);
     }
   };
 
   useEffect(() => {
     // Reset timer when refresh completes
     if (!isLoading) {
-      setTimeLeft(15 * 60);
+      const timer = setTimeout(() => {
+        setTimeLeft(15 * 60);
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [isLoading, results]);
 
