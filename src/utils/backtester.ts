@@ -1118,8 +1118,5 @@ export function runBacktest(
     atr: !isNaN(currentATR) ? Math.round(currentATR * 100) / 100 : null,
   };
 
-  // Prepend the trained consensus model to the list (so it competes with single optimized indicators)
-  results.unshift(trainedResult);
-
-  return results;
+  return [trainedResult];
 }
