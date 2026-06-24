@@ -1132,3 +1132,388 @@ export function runBacktest(
 
   return [trainedResult];
 }
+
+export interface LeverageTrade {
+  timeframe: string;
+  type: "LONG" | "SHORT";
+  entryTime: number;
+  exitTime: number;
+  entryPrice: number;
+  exitPrice: number;
+  margin: number;
+  pnl: number;
+  result: "WIN" | "LOSS";
+  exitReason: "STOP_LOSS" | "TRAILING_STOP" | "SIGNAL_REVERSE" | "LIQUIDATION";
+}
+
+export interface LeveragedPositionState {
+  isActive: boolean;
+  type: "LONG" | "SHORT" | null;
+  entryPrice: number;
+  margin: number;
+  leverage: number;
+  unrealizedPnl: number;
+  unrealizedPnlPercent: number;
+}
+
+interface LeveragePosition {
+  type: "LONG" | "SHORT";
+  entryPrice: number;
+  entryTime: number;
+  margin: number;
+  leverage: number;
+  stopLossPrice: number;
+  highestPrice: number;
+  lowestPrice: number;
+}
+
+export interface LeverageBacktestResult {
+  timeframe: string;
+  netProfit: number;
+  winRate: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  finalBalance: number;
+  currentPosition: LeveragedPositionState;
+  tradeHistory: LeverageTrade[];
+}
+
+export function runLeverageBacktest(
+  timeframe: string,
+  candles: Candle[],
+  initialBalance: number = 10000,
+  tradeMargin: number = 100,
+  leverage: number = 10,
+  feePercent: number = 0.1
+): LeverageBacktestResult {
+  const feeFactor = feePercent / 100;
+  let balance = initialBalance;
+  const trades: LeverageTrade[] = [];
+  
+  if (candles.length < 50) {
+    return {
+      timeframe,
+      netProfit: 0,
+      winRate: 0,
+      totalTrades: 0,
+      winningTrades: 0,
+      losingTrades: 0,
+      finalBalance: initialBalance,
+      currentPosition: { isActive: false, type: null, entryPrice: 0, margin: 0, leverage, unrealizedPnl: 0, unrealizedPnlPercent: 0 },
+      tradeHistory: [],
+    };
+  }
+
+  const aiResults = runBacktest(candles);
+  if (aiResults.length === 0) {
+    return {
+      timeframe,
+      netProfit: 0,
+      winRate: 0,
+      totalTrades: 0,
+      winningTrades: 0,
+      losingTrades: 0,
+      finalBalance: initialBalance,
+      currentPosition: { isActive: false, type: null, entryPrice: 0, margin: 0, leverage, unrealizedPnl: 0, unrealizedPnlPercent: 0 },
+      tradeHistory: [],
+    };
+  }
+
+  const aiResult = aiResults[0];
+  const params = aiResult.indicatorValues;
+
+  const os = params.RSI_OS;
+  const ob = params.RSI_OB;
+  const fast = params.EMA_Fast;
+  const slow = params.EMA_Slow;
+  const bbP = 20;
+  const bbM = params.BB_Sapma;
+  const mFast = 12;
+  const mSlow = 26;
+  const mSig = 9;
+  const tenkanP = params.Tenkan;
+  const kijunP = params.Kijun;
+  const senkouBP = params.SenkouB;
+  const buyT = params.Buy_Esik;
+  const sellT = params.Sell_Esik;
+  const slMult = params.SL_ATR;
+  const trailingMult = params.IzSurenStop_ATR;
+
+  const prices = candles.map((c) => c.close);
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+
+  const rsiV = calculateRSI(prices, 14);
+  const emaF = calculateEMA(prices, fast);
+  const emaS = calculateEMA(prices, slow);
+  const { upper: bbU, lower: bbL } = calculateBollingerBands(prices, bbP, bbM);
+  const { histogram: hist } = calculateMACD(prices, mFast, mSlow, mSig);
+  const haCandles = calculateHeikinAshi(candles);
+  const { tenkanSen: tS, kijunSen: kS, senkouSpanA: sA, senkouSpanB: sB } = calculateIchimoku(highs, lows, prices, tenkanP, kijunP, senkouBP, 26);
+  const atr = calculateATR(highs, lows, prices, 14);
+
+  const getSignal = (i: number) => {
+    let score = 0;
+    if (!isNaN(rsiV[i])) {
+      if (rsiV[i] < os) score += 1;
+      if (rsiV[i] > ob) score -= 1;
+    }
+    if (!isNaN(emaF[i]) && !isNaN(emaS[i])) {
+      if (emaF[i] > emaS[i]) score += 1;
+      else score -= 1;
+    }
+    if (!isNaN(bbU[i]) && !isNaN(bbL[i])) {
+      if (prices[i] < bbL[i]) score += 1;
+      if (prices[i] > bbU[i]) score -= 1;
+    }
+    if (!isNaN(hist[i])) {
+      if (hist[i] > 0) score += 1;
+      else score -= 1;
+    }
+    if (i > 0) {
+      const ha = haCandles[i];
+      if (ha.close > ha.open && ha.open <= ha.low + (ha.high - ha.low) * 0.01) score += 1;
+      if (ha.close < ha.open && ha.open >= ha.high - (ha.high - ha.low) * 0.01) score -= 1;
+    }
+    if (!isNaN(tS[i]) && !isNaN(kS[i]) && !isNaN(sA[i]) && !isNaN(sB[i])) {
+      if (tS[i] > kS[i]) score += 1;
+      else score -= 1;
+
+      if (prices[i] > sA[i] && prices[i] > sB[i]) score += 1;
+      else if (prices[i] < sA[i] && prices[i] < sB[i]) score -= 1;
+    }
+
+    if (score >= buyT) return "BUY";
+    if (score <= sellT) return "SELL";
+    return "NEUTRAL";
+  };
+
+  let activePosition: LeveragePosition | null = null;
+  let winningTrades = 0;
+  let losingTrades = 0;
+
+  for (let i = 50; i < candles.length; i++) {
+    const candle = candles[i];
+    const signal = getSignal(i);
+    const currentAtr = atr[i] || 0;
+
+    if (activePosition) {
+      const pos = activePosition;
+      const isLong = pos.type === "LONG";
+      const liqPrice = isLong 
+        ? pos.entryPrice * (1 - 1 / leverage)
+        : pos.entryPrice * (1 + 1 / leverage);
+
+      let hitLiquidation = false;
+      let hitStopLoss = false;
+
+      if (isLong) {
+        if (candle.low <= liqPrice) hitLiquidation = true;
+        else if (candle.low <= pos.stopLossPrice) hitStopLoss = true;
+      } else {
+        if (candle.high >= liqPrice) hitLiquidation = true;
+        else if (candle.high >= pos.stopLossPrice) hitStopLoss = true;
+      }
+
+      if (hitLiquidation) {
+        const fee = (pos.margin * leverage) * feeFactor;
+        const loss = -pos.margin - fee;
+        balance += loss;
+
+        trades.push({
+          timeframe,
+          type: pos.type,
+          entryTime: pos.entryTime,
+          exitTime: candle.time,
+          entryPrice: pos.entryPrice,
+          exitPrice: liqPrice,
+          margin: pos.margin,
+          pnl: Math.round(loss * 100) / 100,
+          result: "LOSS",
+          exitReason: "LIQUIDATION",
+        });
+        losingTrades++;
+        activePosition = null;
+        continue;
+      }
+
+      if (hitStopLoss) {
+        const exitPrice = pos.stopLossPrice;
+        const priceDiff = isLong ? (exitPrice - pos.entryPrice) : (pos.entryPrice - exitPrice);
+        const grossPnl = (priceDiff / pos.entryPrice) * (pos.margin * leverage);
+        const fee = (pos.margin * leverage) * feeFactor * 2;
+        const netPnl = Math.max(-pos.margin, grossPnl - fee);
+        balance += netPnl;
+
+        trades.push({
+          timeframe,
+          type: pos.type,
+          entryTime: pos.entryTime,
+          exitTime: candle.time,
+          entryPrice: pos.entryPrice,
+          exitPrice: exitPrice,
+          margin: pos.margin,
+          pnl: Math.round(netPnl * 100) / 100,
+          result: netPnl > 0 ? "WIN" : "LOSS",
+          exitReason: "STOP_LOSS",
+        });
+        if (netPnl > 0) winningTrades++; else losingTrades++;
+        activePosition = null;
+        continue;
+      }
+
+      // Update highest/lowest price for trailing
+      if (isLong) {
+        if (candle.high > pos.highestPrice) {
+          pos.highestPrice = candle.high;
+        }
+      } else {
+        if (candle.low < pos.lowestPrice) {
+          pos.lowestPrice = candle.low;
+        }
+      }
+
+      // Check trailing stop
+      if (currentAtr > 0) {
+        const trailingStopPrice = isLong
+          ? pos.highestPrice - currentAtr * trailingMult
+          : pos.lowestPrice + currentAtr * trailingMult;
+
+        let hitTrailing = false;
+        if (isLong) {
+          if (candle.close < trailingStopPrice) hitTrailing = true;
+        } else {
+          if (candle.close > trailingStopPrice) hitTrailing = true;
+        }
+
+        if (hitTrailing) {
+          const exitPrice = candle.close;
+          const priceDiff = isLong ? (exitPrice - pos.entryPrice) : (pos.entryPrice - exitPrice);
+          const grossPnl = (priceDiff / pos.entryPrice) * (pos.margin * leverage);
+          const fee = (pos.margin * leverage) * feeFactor * 2;
+          const netPnl = Math.max(-pos.margin, grossPnl - fee);
+          balance += netPnl;
+
+          trades.push({
+            timeframe,
+            type: pos.type,
+            entryTime: pos.entryTime,
+            exitTime: candle.time,
+            entryPrice: pos.entryPrice,
+            exitPrice: exitPrice,
+            margin: pos.margin,
+            pnl: Math.round(netPnl * 100) / 100,
+            result: netPnl > 0 ? "WIN" : "LOSS",
+            exitReason: "TRAILING_STOP",
+          });
+          if (netPnl > 0) winningTrades++; else losingTrades++;
+          activePosition = null;
+          continue;
+        }
+      }
+
+      // Check reversal
+      const shouldReverse = (isLong && signal === "SELL") || (!isLong && signal === "BUY");
+      if (shouldReverse) {
+        const exitPrice = candle.close;
+        const priceDiff = isLong ? (exitPrice - pos.entryPrice) : (pos.entryPrice - exitPrice);
+        const grossPnl = (priceDiff / pos.entryPrice) * (pos.margin * leverage);
+        const fee = (pos.margin * leverage) * feeFactor * 2;
+        const netPnl = Math.max(-pos.margin, grossPnl - fee);
+        balance += netPnl;
+
+        trades.push({
+          timeframe,
+          type: pos.type,
+          entryTime: pos.entryTime,
+          exitTime: candle.time,
+          entryPrice: pos.entryPrice,
+          exitPrice: exitPrice,
+          margin: pos.margin,
+          pnl: Math.round(netPnl * 100) / 100,
+          result: netPnl > 0 ? "WIN" : "LOSS",
+          exitReason: "SIGNAL_REVERSE",
+        });
+        if (netPnl > 0) winningTrades++; else losingTrades++;
+        activePosition = null;
+        // Fallthrough to open opposite position
+      }
+    }
+
+    if (!activePosition && balance >= tradeMargin) {
+      if (signal === "BUY") {
+        const stopLossPrice = candle.close - currentAtr * slMult;
+        activePosition = {
+          type: "LONG",
+          entryPrice: candle.close,
+          entryTime: candle.time,
+          margin: tradeMargin,
+          leverage,
+          stopLossPrice,
+          highestPrice: candle.close,
+          lowestPrice: candle.close,
+        };
+      } else if (signal === "SELL") {
+        const stopLossPrice = candle.close + currentAtr * slMult;
+        activePosition = {
+          type: "SHORT",
+          entryPrice: candle.close,
+          entryTime: candle.time,
+          margin: tradeMargin,
+          leverage,
+          stopLossPrice,
+          highestPrice: candle.close,
+          lowestPrice: candle.close,
+        };
+      }
+    }
+  }
+
+  let currentPositionState: LeveragedPositionState = {
+    isActive: false,
+    type: null,
+    entryPrice: 0,
+    margin: 0,
+    leverage,
+    unrealizedPnl: 0,
+    unrealizedPnlPercent: 0,
+  };
+
+  if (activePosition) {
+    const pos = activePosition;
+    const lastPrice = prices[prices.length - 1];
+    const isLong = pos.type === "LONG";
+    const priceDiff = isLong ? (lastPrice - pos.entryPrice) : (pos.entryPrice - lastPrice);
+    const grossPnl = (priceDiff / pos.entryPrice) * (pos.margin * leverage);
+    const fee = (pos.margin * leverage) * feeFactor * 2;
+    const netPnl = Math.max(-pos.margin, grossPnl - fee);
+    const pnlPercent = (netPnl / pos.margin) * 100;
+
+    currentPositionState = {
+      isActive: true,
+      type: pos.type,
+      entryPrice: pos.entryPrice,
+      margin: pos.margin,
+      leverage: pos.leverage,
+      unrealizedPnl: Math.round(netPnl * 100) / 100,
+      unrealizedPnlPercent: Math.round(pnlPercent * 100) / 100,
+    };
+  }
+
+  const totalTrades = winningTrades + losingTrades;
+  const winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0;
+  const netProfit = ((balance - initialBalance) / initialBalance) * 100;
+
+  return {
+    timeframe,
+    netProfit: Math.round(netProfit * 100) / 100,
+    winRate: Math.round(winRate * 100) / 100,
+    totalTrades,
+    winningTrades,
+    losingTrades,
+    finalBalance: Math.round(balance * 100) / 100,
+    currentPosition: currentPositionState,
+    tradeHistory: trades,
+  };
+}

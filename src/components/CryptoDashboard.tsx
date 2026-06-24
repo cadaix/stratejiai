@@ -3,11 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { Coins, AlertTriangle, Cpu } from "lucide-react";
 import { fetchCandles, Candle } from "../utils/binance";
-import { runBacktest, BacktestResult } from "../utils/backtester";
+import { runBacktest, BacktestResult, runLeverageBacktest, LeverageBacktestResult } from "../utils/backtester";
 import TradingChart from "./TradingChart";
 import SignalPanel from "./SignalPanel";
 import BacktestPanel from "./BacktestPanel";
 import InvestmentSimulator from "./InvestmentSimulator";
+import LeverageBacktestPanel from "./LeverageBacktestPanel";
 
 const SYMBOLS = [
   "BTC/USDT",
@@ -20,6 +21,7 @@ export default function CryptoDashboard() {
   const [selectedTimeframe, setSelectedTimeframe] = useState("15m");
   const [candles, setCandles] = useState<Candle[]>([]);
   const [backtestResults, setBacktestResults] = useState<BacktestResult[]>([]);
+  const [leverageResults, setLeverageResults] = useState<LeverageBacktestResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -37,6 +39,18 @@ export default function CryptoDashboard() {
 
       const results = runBacktest(data);
       setBacktestResults(results);
+
+      // Load all 5 leverage timeframes in parallel
+      const leverageTimeframes = ["15m", "1h", "4h", "1d", "1w"];
+      const levPromises = leverageTimeframes.map(async (tf) => {
+        const limit = tf === "1d" ? 1000 : (tf === "1w" ? 300 : 500);
+        const tfCandles = await fetchCandles(selectedSymbol, tf, limit);
+        return runLeverageBacktest(tf, tfCandles, 10000, 100, 10);
+      });
+
+      const levResults = await Promise.all(levPromises);
+      setLeverageResults(levResults);
+
       setLastUpdated(new Date());
     } catch (err: any) {
       console.error(err);
@@ -201,6 +215,11 @@ export default function CryptoDashboard() {
           {/* Investment Simulator */}
           {!isLoading && backtestResults.length > 0 && (
             <InvestmentSimulator results={backtestResults} symbol={selectedSymbol} />
+          )}
+
+          {/* Leverage Simulator */}
+          {!isLoading && leverageResults.length > 0 && (
+            <LeverageBacktestPanel results={leverageResults} symbol={selectedSymbol} />
           )}
         </div>
       </div>
