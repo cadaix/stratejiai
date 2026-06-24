@@ -28,6 +28,32 @@ export async function GET(request: Request) {
     );
   }
 
+  const isTest = searchParams.get("test") === "true";
+  if (isTest) {
+    try {
+      const testMessage = `*🤖 Trade Hub AI Test Mesajı*\n\nTelegram bot bağlantınız başarıyla kurulmuştur! Sinyaller oluştuğunda bu kanal üzerinden bilgilendirileceksiniz.`;
+      const telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+      const response = await fetch(telegramUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: testMessage,
+          parse_mode: "Markdown",
+        }),
+      });
+
+      if (response.ok) {
+        return NextResponse.json({ status: "Success", message: "Test message sent to Telegram successfully!" });
+      } else {
+        const errorText = await response.text();
+        return NextResponse.json({ status: "Failed", error: `Telegram API error: ${errorText}` }, { status: 400 });
+      }
+    } catch (err: any) {
+      return NextResponse.json({ status: "Failed", error: err.message }, { status: 500 });
+    }
+  }
+
   const sentAlerts: any[] = [];
   const processedSymbols = Array.from(new Set(SYMBOLS));
 
