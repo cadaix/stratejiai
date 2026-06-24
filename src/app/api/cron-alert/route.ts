@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { fetchCandles } from "@/utils/binance";
 import { runBacktest } from "@/utils/backtester";
 
-const SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"];
+const SYMBOLS = ["BTC/USDT", "SOL/USDT"];
 const TIMEFRAMES = ["1d", "4h", "1h"];
 
 export async function GET(request: Request) {

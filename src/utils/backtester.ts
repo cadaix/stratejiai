@@ -5,6 +5,8 @@ import {
   calculateEMA,
   calculateBollingerBands,
   calculateATR,
+  calculateHeikinAshi,
+  calculateIchimoku,
 } from "./indicators";
 
 export interface Trade {
@@ -182,6 +184,9 @@ export function runBacktest(
   const currentATR = atr[atr.length - 1];
   const currentPrice = prices[prices.length - 1];
 
+  const haCandles = calculateHeikinAshi(candles);
+  const { tenkanSen, kijunSen, senkouSpanA, senkouSpanB } = calculateIchimoku(highs, lows, prices, 9, 26, 52, 26);
+
   // 2. Define static strategies
   const staticStrategies = [
     {
@@ -262,6 +267,56 @@ export function runBacktest(
         BB_Orta: Math.round(bbMiddle[bbMiddle.length - 1] * 100) / 100,
         BB_Alt: Math.round(bbLower[bbLower.length - 1] * 100) / 100,
       }),
+    },
+    {
+      name: "Heiken Ashi Trend",
+      evaluate: (i: number) => {
+        if (i === 0) return "NEUTRAL";
+        const ha = haCandles[i];
+        if (ha.close > ha.open && ha.open <= ha.low + (ha.high - ha.low) * 0.01) return "BUY";
+        if (ha.close < ha.open && ha.open >= ha.high - (ha.high - ha.low) * 0.01) return "SELL";
+        return "NEUTRAL";
+      },
+      getCurrentSignal: () => {
+        const lastHA = haCandles[haCandles.length - 1];
+        if (lastHA.close > lastHA.open && lastHA.open <= lastHA.low + (lastHA.high - lastHA.low) * 0.01) return "BUY";
+        if (lastHA.close < lastHA.open && lastHA.open >= lastHA.high - (lastHA.high - lastHA.low) * 0.01) return "SELL";
+        return "NEUTRAL";
+      },
+      getIndicatorValues: () => {
+        const lastHA = haCandles[haCandles.length - 1];
+        return {
+          HA_Acilis: Math.round(lastHA.open * 100) / 100,
+          HA_Kapanis: Math.round(lastHA.close * 100) / 100,
+        };
+      },
+    },
+    {
+      name: "Ichimoku Bulutu (9/26/52)",
+      evaluate: (i: number) => {
+        if (isNaN(tenkanSen[i]) || isNaN(kijunSen[i]) || isNaN(senkouSpanA[i]) || isNaN(senkouSpanB[i])) return "NEUTRAL";
+        const price = prices[i];
+        if (tenkanSen[i] > kijunSen[i] && price > senkouSpanA[i] && price > senkouSpanB[i]) return "BUY";
+        if (tenkanSen[i] < kijunSen[i] || (price < senkouSpanA[i] && price < senkouSpanB[i])) return "SELL";
+        return "NEUTRAL";
+      },
+      getCurrentSignal: () => {
+        const lastIdx = prices.length - 1;
+        const price = prices[lastIdx];
+        if (isNaN(tenkanSen[lastIdx]) || isNaN(kijunSen[lastIdx]) || isNaN(senkouSpanA[lastIdx]) || isNaN(senkouSpanB[lastIdx])) return "NEUTRAL";
+        if (tenkanSen[lastIdx] > kijunSen[lastIdx] && price > senkouSpanA[lastIdx] && price > senkouSpanB[lastIdx]) return "BUY";
+        if (tenkanSen[lastIdx] < kijunSen[lastIdx] || (price < senkouSpanA[lastIdx] && price < senkouSpanB[lastIdx])) return "SELL";
+        return "NEUTRAL";
+      },
+      getIndicatorValues: () => {
+        const lastIdx = prices.length - 1;
+        return {
+          Tenkan: Math.round(tenkanSen[lastIdx] * 100) / 100,
+          Kijun: Math.round(kijunSen[lastIdx] * 100) / 100,
+          SenkouA: Math.round(senkouSpanA[lastIdx] * 100) / 100,
+          SenkouB: Math.round(senkouSpanB[lastIdx] * 100) / 100,
+        };
+      },
     },
   ];
 
@@ -710,6 +765,110 @@ export function runBacktest(
     }
   }
 
+  // 3g. Ichimoku Grid Search
+  for (const t of [7, 9, 12]) {
+    for (const k of [20, 26, 32]) {
+      const { tenkanSen: tS, kijunSen: kS, senkouSpanA: sA, senkouSpanB: sB } = calculateIchimoku(highs, lows, prices, t, k, 52, 26);
+      const evalFn = (i: number) => {
+        if (isNaN(tS[i]) || isNaN(kS[i]) || isNaN(sA[i]) || isNaN(sB[i])) return "NEUTRAL";
+        const price = prices[i];
+        if (tS[i] > kS[i] && price > sA[i] && price > sB[i]) return "BUY";
+        if (tS[i] < kS[i] || (price < sA[i] && price < sB[i])) return "SELL";
+        return "NEUTRAL";
+      };
+      const stats = testStrategy(candles, evalFn, initialBalance, feePercent);
+      if (stats.netProfit > bestAIProfit && stats.totalTrades > 0) {
+        bestAIProfit = stats.netProfit;
+        const lastIdx = prices.length - 1;
+        const price = prices[lastIdx];
+        const currentSignal = (tS[lastIdx] > kS[lastIdx] && price > sA[lastIdx] && price > sB[lastIdx]) ? "BUY" : ((tS[lastIdx] < kS[lastIdx] || (price < sA[lastIdx] && price < sB[lastIdx])) ? "SELL" : "NEUTRAL");
+
+        let stopLoss: number | null = null;
+        let takeProfit: number | null = null;
+        if (!isNaN(currentATR) && currentATR > 0) {
+          if (currentSignal === "BUY") {
+            stopLoss = Math.round((currentPrice - currentATR * 1.5) * 100) / 100;
+            takeProfit = Math.round((currentPrice + currentATR * 3) * 100) / 100;
+          } else if (currentSignal === "SELL") {
+            stopLoss = Math.round((currentPrice + currentATR * 1.5) * 100) / 100;
+            takeProfit = Math.round((currentPrice - currentATR * 3) * 100) / 100;
+          }
+        }
+
+        bestAIResult = {
+          strategyName: `⚡ AI Opt. Ichimoku (${t}/${k}/52)`,
+          netProfit: stats.netProfit,
+          winRate: stats.winRate,
+          totalTrades: stats.totalTrades,
+          winningTrades: stats.winningTrades,
+          losingTrades: stats.losingTrades,
+          finalBalance: Math.round(initialBalance * (1 + stats.netProfit / 100) * 100) / 100,
+          tradeHistory: stats.tradeHistory,
+          currentSignal,
+          indicatorValues: {
+            Tenkan: Math.round(tS[lastIdx] * 100) / 100,
+            Kijun: Math.round(kS[lastIdx] * 100) / 100,
+            SenkouA: Math.round(sA[lastIdx] * 100) / 100,
+            SenkouB: Math.round(sB[lastIdx] * 100) / 100,
+          },
+          stopLoss,
+          takeProfit,
+          atr: !isNaN(currentATR) ? Math.round(currentATR * 100) / 100 : null,
+        };
+      }
+    }
+  }
+
+  // 3h. Heikin Ashi + EMA Crossover Combo Grid Search
+  for (const fast of [5, 9, 12]) {
+    const emaVal = calculateEMA(prices, fast);
+    const evalFn = (i: number) => {
+      if (i === 0 || isNaN(emaVal[i])) return "NEUTRAL";
+      const ha = haCandles[i];
+      if (ha.close > ha.open && prices[i] > emaVal[i] && prices[i-1] <= emaVal[i-1]) return "BUY";
+      if (ha.close < ha.open && prices[i] < emaVal[i] && prices[i-1] >= emaVal[i-1]) return "SELL";
+      return "NEUTRAL";
+    };
+    const stats = testStrategy(candles, evalFn, initialBalance, feePercent);
+    if (stats.netProfit > bestAIProfit && stats.totalTrades > 0) {
+      bestAIProfit = stats.netProfit;
+      const lastHA = haCandles[haCandles.length - 1];
+      const lastEMA = emaVal[emaVal.length - 1];
+      const currentSignal = (lastHA.close > lastHA.open && currentPrice > lastEMA) ? "BUY" : ((lastHA.close < lastHA.open && currentPrice < lastEMA) ? "SELL" : "NEUTRAL");
+
+      let stopLoss: number | null = null;
+      let takeProfit: number | null = null;
+      if (!isNaN(currentATR) && currentATR > 0) {
+        if (currentSignal === "BUY") {
+          stopLoss = Math.round((currentPrice - currentATR * 1.5) * 100) / 100;
+          takeProfit = Math.round((currentPrice + currentATR * 3) * 100) / 100;
+        } else if (currentSignal === "SELL") {
+          stopLoss = Math.round((currentPrice + currentATR * 1.5) * 100) / 100;
+          takeProfit = Math.round((currentPrice - currentATR * 3) * 100) / 100;
+        }
+      }
+
+      bestAIResult = {
+        strategyName: `⚡ AI Opt. HA+EMA Combo (${fast})`,
+        netProfit: stats.netProfit,
+        winRate: stats.winRate,
+        totalTrades: stats.totalTrades,
+        winningTrades: stats.winningTrades,
+        losingTrades: stats.losingTrades,
+        finalBalance: Math.round(initialBalance * (1 + stats.netProfit / 100) * 100) / 100,
+        tradeHistory: stats.tradeHistory,
+        currentSignal,
+        indicatorValues: {
+          HA_Close: Math.round(lastHA.close * 100) / 100,
+          EMA: Math.round(lastEMA * 100) / 100,
+        },
+        stopLoss,
+        takeProfit,
+        atr: !isNaN(currentATR) ? Math.round(currentATR * 100) / 100 : null,
+      };
+    }
+  }
+
   // Prepend the best AI strategy to the list
   if (bestAIResult) {
     results.unshift(bestAIResult);
@@ -726,8 +885,11 @@ export function runBacktest(
   let currentMacdFast = 12;
   let currentMacdSlow = 26;
   let currentMacdSignal = 9;
-  let currentBuyThreshold = 2;
-  let currentSellThreshold = -2;
+  let currentTenkan = 9;
+  let currentKijun = 26;
+  let currentSenkouB = 52;
+  let currentBuyThreshold = 3;  // Score range is larger now: -7 to +7
+  let currentSellThreshold = -3;
   let currentSlMult = 1.5;
   let currentTpMult = 3.0;
   let currentTrailingMult = 2.0;
@@ -743,6 +905,7 @@ export function runBacktest(
   const evaluateAgent = (
     os: number, ob: number, fast: number, slow: number, 
     bbP: number, bbM: number, mFast: number, mSlow: number, mSig: number,
+    tenkanP: number, kijunP: number, senkouBP: number,
     buyT: number, sellT: number, trailingM: number
   ) => {
     const rsiV = calculateRSI(prices, 14);
@@ -750,6 +913,7 @@ export function runBacktest(
     const emaS = calculateEMA(prices, slow);
     const { upper: bbU, lower: bbL } = calculateBollingerBands(prices, bbP, bbM);
     const { histogram: hist } = calculateMACD(prices, mFast, mSlow, mSig);
+    const { tenkanSen: tS, kijunSen: kS, senkouSpanA: sA, senkouSpanB: sB } = calculateIchimoku(highs, lows, prices, tenkanP, kijunP, senkouBP, 26);
 
     const evalFn = (i: number) => {
       let score = 0;
@@ -769,6 +933,21 @@ export function runBacktest(
         if (hist[i] > 0) score += 1;
         else score -= 1;
       }
+      // Heikin Ashi
+      if (i > 0) {
+        const ha = haCandles[i];
+        if (ha.close > ha.open && ha.open <= ha.low + (ha.high - ha.low) * 0.01) score += 1;
+        if (ha.close < ha.open && ha.open >= ha.high - (ha.high - ha.low) * 0.01) score -= 1;
+      }
+      // Ichimoku
+      if (!isNaN(tS[i]) && !isNaN(kS[i]) && !isNaN(sA[i]) && !isNaN(sB[i])) {
+        if (tS[i] > kS[i]) score += 1;
+        else score -= 1;
+
+        if (prices[i] > sA[i] && prices[i] > sB[i]) score += 1;
+        else if (prices[i] < sA[i] && prices[i] < sB[i]) score -= 1;
+      }
+
       if (score >= buyT) return "BUY";
       if (score <= sellT) return "SELL";
       return "NEUTRAL";
@@ -781,6 +960,7 @@ export function runBacktest(
   let bestTrainedStats = evaluateAgent(
     currentOS, currentOB, currentEmaFast, currentEmaSlow,
     currentBbPeriod, currentBbMult, currentMacdFast, currentMacdSlow, currentMacdSignal,
+    currentTenkan, currentKijun, currentSenkouB,
     currentBuyThreshold, currentSellThreshold, currentTrailingMult
   );
   let bestTrainedProfit = bestTrainedStats.netProfit;
@@ -801,13 +981,20 @@ export function runBacktest(
     if (tempMSlow <= tempMFast) continue;
     
     const tempMSig = mutateParam(currentMacdSignal, 5, 12, 1);
-    const tempBuyT = mutateParam(currentBuyThreshold, 1, 3, 1);
-    const tempSellT = mutateParam(currentSellThreshold, -3, -1, 1);
+    const tempTenkan = mutateParam(currentTenkan, 7, 15, 1);
+    const tempKijun = mutateParam(currentKijun, 20, 35, 1);
+    const tempSenkouB = mutateParam(currentSenkouB, 40, 65, 2);
+    if (tempKijun <= tempTenkan) continue;
+    if (tempSenkouB <= tempKijun) continue;
+
+    const tempBuyT = mutateParam(currentBuyThreshold, 1, 5, 1);
+    const tempSellT = mutateParam(currentSellThreshold, -5, -1, 1);
     const tempTrailingM = mutateParam(currentTrailingMult, 1.0, 4.0, 0.1);
 
     const stats = evaluateAgent(
       tempOS, tempOB, tempFast, tempSlow,
       tempBbP, tempBbM, tempMFast, tempMSlow, tempMSig,
+      tempTenkan, tempKijun, tempSenkouB,
       tempBuyT, tempSellT, tempTrailingM
     );
 
@@ -823,6 +1010,9 @@ export function runBacktest(
       currentMacdFast = tempMFast;
       currentMacdSlow = tempMSlow;
       currentMacdSignal = tempMSig;
+      currentTenkan = tempTenkan;
+      currentKijun = tempKijun;
+      currentSenkouB = tempSenkouB;
       currentBuyThreshold = tempBuyT;
       currentSellThreshold = tempSellT;
       currentTrailingMult = tempTrailingM;
@@ -844,6 +1034,13 @@ export function runBacktest(
   const { upper: finalUpper, lower: finalLower } = calculateBollingerBands(prices, currentBbPeriod, currentBbMult);
   const finalHist = calculateMACD(prices, currentMacdFast, currentMacdSlow, currentMacdSignal).histogram;
   const lastHist = finalHist[finalHist.length - 1];
+  
+  const finalHA = haCandles[haCandles.length - 1];
+  const { tenkanSen: fTenkan, kijunSen: fKijun, senkouSpanA: fSpanA, senkouSpanB: fSpanB } = calculateIchimoku(highs, lows, prices, currentTenkan, currentKijun, currentSenkouB, 26);
+  const lastTenkan = fTenkan[fTenkan.length - 1];
+  const lastKijun = fKijun[fKijun.length - 1];
+  const lastSpanA = fSpanA[fSpanA.length - 1];
+  const lastSpanB = fSpanB[fSpanB.length - 1];
 
   let currentScore = 0;
   if (!isNaN(finalRsi)) {
@@ -861,6 +1058,20 @@ export function runBacktest(
   if (!isNaN(lastHist)) {
     if (lastHist > 0) currentScore += 1;
     else currentScore -= 1;
+  }
+  // Heikin Ashi final score
+  if (finalHA.close > finalHA.open && finalHA.open <= finalHA.low + (finalHA.high - finalHA.low) * 0.01) {
+    currentScore += 1;
+  } else if (finalHA.close < finalHA.open && finalHA.open >= finalHA.high - (finalHA.high - finalHA.low) * 0.01) {
+    currentScore -= 1;
+  }
+  // Ichimoku final score
+  if (!isNaN(lastTenkan) && !isNaN(lastKijun) && !isNaN(lastSpanA) && !isNaN(lastSpanB)) {
+    if (lastTenkan > lastKijun) currentScore += 1;
+    else currentScore -= 1;
+
+    if (currentPrice > lastSpanA && currentPrice > lastSpanB) currentScore += 1;
+    else if (currentPrice < lastSpanA && currentPrice < lastSpanB) currentScore -= 1;
   }
 
   const finalSignal = currentScore >= currentBuyThreshold ? "BUY" : (currentScore <= currentSellThreshold ? "SELL" : "NEUTRAL");
@@ -893,6 +1104,9 @@ export function runBacktest(
       EMA_Fast: currentEmaFast,
       EMA_Slow: currentEmaSlow,
       BB_Sapma: Math.round(currentBbMult * 10) / 10,
+      Tenkan: currentTenkan,
+      Kijun: currentKijun,
+      SenkouB: currentSenkouB,
       Buy_Esik: currentBuyThreshold,
       Sell_Esik: currentSellThreshold,
       SL_ATR: currentSlMult,

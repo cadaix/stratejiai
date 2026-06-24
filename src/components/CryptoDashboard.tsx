@@ -11,12 +11,7 @@ import InvestmentSimulator from "./InvestmentSimulator";
 
 const SYMBOLS = [
   "BTC/USDT",
-  "ETH/USDT",
-  "BNB/USDT",
   "SOL/USDT",
-  "ADA/USDT",
-  "XRP/USDT",
-  "DOGE/USDT",
 ];
 const TIMEFRAMES = ["15m", "1h", "4h", "1d", "1w", "1M", "1y", "5y"];
 

@@ -1,3 +1,5 @@
+import { Candle } from "./binance";
+
 export function calculateSMA(prices: number[], period: number): number[] {
   const sma: number[] = [];
   for (let i = 0; i < prices.length; i++) {
@@ -167,4 +169,125 @@ export function calculateATR(
   }
 
   return atr;
+}
+
+export interface HeikinAshiCandle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export function calculateHeikinAshi(candles: Candle[]): HeikinAshiCandle[] {
+  const haCandles: HeikinAshiCandle[] = [];
+  if (candles.length === 0) return haCandles;
+
+  // First candle initialization
+  let prevOpen = (candles[0].open + candles[0].close) / 2;
+  let prevClose = (candles[0].open + candles[0].high + candles[0].low + candles[0].close) / 4;
+  let prevHigh = Math.max(candles[0].high, prevOpen, prevClose);
+  let prevLow = Math.min(candles[0].low, prevOpen, prevClose);
+
+  haCandles.push({
+    time: candles[0].time,
+    open: prevOpen,
+    high: prevHigh,
+    low: prevLow,
+    close: prevClose,
+    volume: candles[0].volume,
+  });
+
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i];
+    const close = (c.open + c.high + c.low + c.close) / 4;
+    const open = (prevOpen + prevClose) / 2;
+    const high = Math.max(c.high, open, close);
+    const low = Math.min(c.low, open, close);
+
+    haCandles.push({
+      time: c.time,
+      open,
+      high,
+      low,
+      close,
+      volume: c.volume,
+    });
+
+    prevOpen = open;
+    prevClose = close;
+  }
+
+  return haCandles;
+}
+
+export interface IchimokuResult {
+  tenkanSen: number[];
+  kijunSen: number[];
+  senkouSpanA: number[];
+  senkouSpanB: number[];
+  chikouSpan: number[];
+}
+
+export function calculateIchimoku(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  tenkanPeriod: number = 9,
+  kijunPeriod: number = 26,
+  senkouBPeriod: number = 52,
+  displacement: number = 26
+): IchimokuResult {
+  const len = closes.length;
+  const tenkanSen: number[] = Array(len).fill(NaN);
+  const kijunSen: number[] = Array(len).fill(NaN);
+  const senkouSpanA: number[] = Array(len).fill(NaN);
+  const senkouSpanB: number[] = Array(len).fill(NaN);
+  const chikouSpan: number[] = Array(len).fill(NaN);
+
+  const getPeriodHighLow = (startIdx: number, period: number) => {
+    let maxHigh = -Infinity;
+    let minLow = Infinity;
+    const searchStart = Math.max(0, startIdx - period + 1);
+    for (let i = searchStart; i <= startIdx; i++) {
+      if (highs[i] > maxHigh) maxHigh = highs[i];
+      if (lows[i] < minLow) minLow = lows[i];
+    }
+    return { maxHigh, minLow };
+  };
+
+  for (let i = 0; i < len; i++) {
+    // Tenkan-sen
+    if (i >= tenkanPeriod - 1) {
+      const { maxHigh, minLow } = getPeriodHighLow(i, tenkanPeriod);
+      tenkanSen[i] = (maxHigh + minLow) / 2;
+    }
+
+    // Kijun-sen
+    if (i >= kijunPeriod - 1) {
+      const { maxHigh, minLow } = getPeriodHighLow(i, kijunPeriod);
+      kijunSen[i] = (maxHigh + minLow) / 2;
+    }
+
+    // Senkou Span A (plotted displacement periods forward)
+    const targetIdx = i + displacement;
+    if (targetIdx < len && !isNaN(tenkanSen[i]) && !isNaN(kijunSen[i])) {
+      senkouSpanA[targetIdx] = (tenkanSen[i] + kijunSen[i]) / 2;
+    }
+
+    // Senkou Span B (plotted displacement periods forward)
+    if (i >= senkouBPeriod - 1 && targetIdx < len) {
+      const { maxHigh, minLow } = getPeriodHighLow(i, senkouBPeriod);
+      senkouSpanB[targetIdx] = (maxHigh + minLow) / 2;
+    }
+
+    // Chikou Span (lagging close, plotted displacement periods behind)
+    const lagIdx = i - displacement;
+    if (lagIdx >= 0) {
+      chikouSpan[lagIdx] = closes[i];
+    }
+  }
+
+  return { tenkanSen, kijunSen, senkouSpanA, senkouSpanB, chikouSpan };
 }
