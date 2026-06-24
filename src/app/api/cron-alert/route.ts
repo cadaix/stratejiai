@@ -147,7 +147,8 @@ export async function GET(request: Request) {
         }
       } catch (err) {
         console.error(`Error processing alert for ${symbol} on ${timeframe}:`, err);
-        reportMessage += `• *${timeframeLabels[timeframe]}:* Analiz sırasında hata oluştu.\n`;
+        const errorMessage = err instanceof Error ? err.message : "Bilinmeyen hata";
+        reportMessage += `• *${timeframeLabels[timeframe]}:* Analiz sırasında hata oluştu (${errorMessage}).\n`;
       }
     }
 
