@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Play, RotateCcw, TrendingUp, TrendingDown, Info, ShieldCheck } from "lucide-react";
+import { Play, RotateCcw, TrendingUp, TrendingDown, Info, ShieldCheck, Send, CheckCircle, AlertCircle, Lock } from "lucide-react";
 import { BacktestResult } from "../utils/backtester";
 
 interface SignalPanelProps {
@@ -24,6 +24,33 @@ export default function SignalPanel({
   lastUpdated,
 }: SignalPanelProps) {
   const [timeLeft, setTimeLeft] = useState(15 * 60); // 15 minutes in seconds
+  const [tgStatus, setTgStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [tgResponse, setTgResponse] = useState<string | null>(null);
+  const [cronSecret, setCronSecret] = useState("YOUR_CRON_SECRET_HERE");
+
+  const handleTelegramTest = async (testMode: boolean) => {
+    setTgStatus("loading");
+    setTgResponse(null);
+    try {
+      const url = `/api/cron-alert?${testMode ? "test=true&" : ""}secret=${encodeURIComponent(cronSecret)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      
+      if (res.ok) {
+        setTgStatus("success");
+        setTgResponse(testMode 
+          ? "Başarılı! Telegram botuna test mesajı gönderildi." 
+          : "Başarılı! Güncel rapor Telegram botuna gönderildi."
+        );
+      } else {
+        setTgStatus("error");
+        setTgResponse(data.error || "Bilinmeyen bir hata oluştu.");
+      }
+    } catch (err: any) {
+      setTgStatus("error");
+      setTgResponse("API isteği başarısız oldu: " + err.message);
+    }
+  };
 
   useEffect(() => {
     // Reset timer when refresh completes
@@ -303,6 +330,125 @@ export default function SignalPanel({
               </span>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Telegram Bot Control Panel */}
+      <div className="glass-panel" style={{ marginTop: "1rem" }}>
+        <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <Send size={18} style={{ color: "var(--accent-primary)" }} />
+          <span>Telegram Bot Kontrolü</span>
+        </h3>
+        
+        <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "1rem", lineHeight: "1.4" }}>
+          Bot bağlantısını test edin veya manuel olarak anlık piyasa yorumu ve sinyal raporu gönderin.
+        </p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          {/* Cron Secret Input */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+            <label style={{ fontSize: "0.75rem", color: "var(--text-secondary)", fontWeight: 500, display: "flex", alignItems: "center", gap: "0.25rem" }}>
+              <Lock size={12} />
+              <span>Cron Şifresi (CRON_SECRET)</span>
+            </label>
+            <input
+              type="text"
+              value={cronSecret}
+              onChange={(e) => setCronSecret(e.target.value)}
+              placeholder="Şifreyi girin..."
+              style={{
+                background: "rgba(0, 0, 0, 0.2)",
+                border: "1px solid var(--border-color)",
+                borderRadius: "var(--border-radius-sm)",
+                padding: "0.45rem 0.75rem",
+                color: "var(--text-primary)",
+                fontSize: "0.85rem",
+                fontFamily: "var(--font-sans)",
+                width: "100%",
+                outline: "none"
+              }}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              onClick={() => handleTelegramTest(true)}
+              disabled={tgStatus === "loading" || isLoading}
+              className="btn btn-secondary"
+              style={{ flex: 1, padding: "0.5rem", fontSize: "0.8rem" }}
+            >
+              <span>Test Gönder</span>
+            </button>
+            <button
+              onClick={() => handleTelegramTest(false)}
+              disabled={tgStatus === "loading" || isLoading}
+              className="btn btn-primary"
+              style={{ flex: 1, padding: "0.5rem", fontSize: "0.8rem" }}
+            >
+              <span>Rapor Gönder</span>
+            </button>
+          </div>
+
+          {/* Response Status */}
+          {tgStatus !== "idle" && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.35rem",
+                padding: "0.6rem 0.75rem",
+                borderRadius: "var(--border-radius-sm)",
+                background: tgStatus === "success" 
+                  ? "rgba(16, 185, 129, 0.05)" 
+                  : tgStatus === "error" 
+                  ? "rgba(239, 68, 68, 0.05)" 
+                  : "rgba(255, 255, 255, 0.02)",
+                border: `1px solid ${
+                  tgStatus === "success" 
+                    ? "rgba(16, 185, 129, 0.15)" 
+                    : tgStatus === "error" 
+                    ? "rgba(239, 68, 68, 0.15)" 
+                    : "var(--border-color)"
+                }`,
+                fontSize: "0.8rem"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                {tgStatus === "loading" && (
+                  <div className="pulse-dot" style={{ background: "var(--accent-primary)", boxShadow: "0 0 8px var(--accent-primary)" }} />
+                )}
+                {tgStatus === "success" && (
+                  <CheckCircle size={14} style={{ color: "var(--color-buy)" }} />
+                )}
+                {tgStatus === "error" && (
+                  <AlertCircle size={14} style={{ color: "var(--color-sell)" }} />
+                )}
+                <span style={{ 
+                  fontWeight: 600, 
+                  color: tgStatus === "success" 
+                    ? "var(--color-buy)" 
+                    : tgStatus === "error" 
+                    ? "var(--color-sell)" 
+                    : "var(--text-primary)" 
+                }}>
+                  {tgStatus === "loading" && "İstek gönderiliyor..."}
+                  {tgStatus === "success" && "Başarılı"}
+                  {tgStatus === "error" && "Hata Oluştu"}
+                </span>
+              </div>
+              {tgResponse && (
+                <div style={{ 
+                  color: tgStatus === "error" ? "var(--color-sell)" : "var(--text-secondary)", 
+                  fontSize: "0.75rem",
+                  wordBreak: "break-all",
+                  whiteSpace: "pre-wrap",
+                  fontFamily: tgStatus === "error" ? "monospace" : "inherit"
+                }}>
+                  {tgResponse}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

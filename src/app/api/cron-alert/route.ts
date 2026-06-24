@@ -53,7 +53,10 @@ export async function GET(request: Request) {
   const isHeaderAuthorized = process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const isQueryAuthorized = process.env.CRON_SECRET && querySecret === process.env.CRON_SECRET;
 
-  if (process.env.CRON_SECRET && !isHeaderAuthorized && !isQueryAuthorized) {
+  // Bypass authorization check in development mode to ease local testing
+  const isDevelopment = process.env.NODE_ENV === "development";
+
+  if (!isDevelopment && process.env.CRON_SECRET && !isHeaderAuthorized && !isQueryAuthorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
