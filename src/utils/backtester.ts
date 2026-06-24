@@ -894,6 +894,15 @@ export function runBacktest(
   let currentTpMult = 3.0;
   let currentTrailingMult = 2.0;
 
+  // Initialize indicator weights
+  let wRsi = 1.0;
+  let wEma = 1.0;
+  let wBb = 1.0;
+  let wMacd = 1.0;
+  let wHa = 1.0;
+  let wIchiCross = 1.0;
+  let wIchiCloud = 1.0;
+
   // Helper to mutate parameters in a range
   const mutateParam = (val: number, min: number, max: number, step: number): number => {
     const direction = Math.random() > 0.5 ? 1 : -1;
@@ -901,12 +910,13 @@ export function runBacktest(
     return Math.max(min, Math.min(max, Number(newVal.toFixed(2))));
   };
 
-  // Function to evaluate profit for a specific set of parameters
+  // Function to evaluate profit for a specific set of parameters and weights
   const evaluateAgent = (
     os: number, ob: number, fast: number, slow: number, 
     bbP: number, bbM: number, mFast: number, mSlow: number, mSig: number,
     tenkanP: number, kijunP: number, senkouBP: number,
-    buyT: number, sellT: number, trailingM: number
+    buyT: number, sellT: number, trailingM: number,
+    wr: number, we: number, wb: number, wm: number, wh: number, wic: number, wild: number
   ) => {
     const rsiV = calculateRSI(prices, 14);
     const emaF = calculateEMA(prices, fast);
@@ -918,34 +928,34 @@ export function runBacktest(
     const evalFn = (i: number) => {
       let score = 0;
       if (!isNaN(rsiV[i])) {
-        if (rsiV[i] < os) score += 1;
-        if (rsiV[i] > ob) score -= 1;
+        if (rsiV[i] < os) score += wr;
+        if (rsiV[i] > ob) score -= wr;
       }
       if (!isNaN(emaF[i]) && !isNaN(emaS[i])) {
-        if (emaF[i] > emaS[i]) score += 1;
-        else score -= 1;
+        if (emaF[i] > emaS[i]) score += we;
+        else score -= we;
       }
       if (!isNaN(bbU[i]) && !isNaN(bbL[i])) {
-        if (prices[i] < bbL[i]) score += 1;
-        if (prices[i] > bbU[i]) score -= 1;
+        if (prices[i] < bbL[i]) score += wb;
+        if (prices[i] > bbU[i]) score -= wb;
       }
       if (!isNaN(hist[i])) {
-        if (hist[i] > 0) score += 1;
-        else score -= 1;
+        if (hist[i] > 0) score += wm;
+        else score -= wm;
       }
       // Heikin Ashi
       if (i > 0) {
         const ha = haCandles[i];
-        if (ha.close > ha.open && ha.open <= ha.low + (ha.high - ha.low) * 0.01) score += 1;
-        if (ha.close < ha.open && ha.open >= ha.high - (ha.high - ha.low) * 0.01) score -= 1;
+        if (ha.close > ha.open && ha.open <= ha.low + (ha.high - ha.low) * 0.01) score += wh;
+        if (ha.close < ha.open && ha.open >= ha.high - (ha.high - ha.low) * 0.01) score -= wh;
       }
       // Ichimoku
       if (!isNaN(tS[i]) && !isNaN(kS[i]) && !isNaN(sA[i]) && !isNaN(sB[i])) {
-        if (tS[i] > kS[i]) score += 1;
-        else score -= 1;
+        if (tS[i] > kS[i]) score += wic;
+        else score -= wic;
 
-        if (prices[i] > sA[i] && prices[i] > sB[i]) score += 1;
-        else if (prices[i] < sA[i] && prices[i] < sB[i]) score -= 1;
+        if (prices[i] > sA[i] && prices[i] > sB[i]) score += wild;
+        else if (prices[i] < sA[i] && prices[i] < sB[i]) score -= wild;
       }
 
       if (score >= buyT) return "BUY";
@@ -956,12 +966,104 @@ export function runBacktest(
     return testStrategy(candles, evalFn, initialBalance, feePercent, trailingM, atr);
   };
 
+  // Self-Correction loop that penalizes false signals from losing trades and rewards correct indicators
+  const runSelfCorrectionFeedbackLoop = (
+    os: number, ob: number, fast: number, slow: number,
+    bbP: number, bbM: number, mFast: number, mSlow: number, mSig: number,
+    tenkanP: number, kijunP: number, senkouBP: number,
+    buyT: number, sellT: number, trailingM: number,
+    weights: { rsi: number; ema: number; bb: number; macd: number; ha: number; ichiCross: number; ichiCloud: number }
+  ) => {
+    const stats = evaluateAgent(
+      os, ob, fast, slow, bbP, bbM, mFast, mSlow, mSig, tenkanP, kijunP, senkouBP,
+      buyT, sellT, trailingM,
+      weights.rsi, weights.ema, weights.bb, weights.macd, weights.ha, weights.ichiCross, weights.ichiCloud
+    );
+
+    const updatedWeights = { ...weights };
+    const rsiV = calculateRSI(prices, 14);
+    const emaF = calculateEMA(prices, fast);
+    const emaS = calculateEMA(prices, slow);
+    const { upper: bbU, lower: bbL } = calculateBollingerBands(prices, bbP, bbM);
+    const { histogram: hist } = calculateMACD(prices, mFast, mSlow, mSig);
+    const { tenkanSen: tS, kijunSen: kS, senkouSpanA: sA, senkouSpanB: sB } = calculateIchimoku(highs, lows, prices, tenkanP, kijunP, senkouBP, 26);
+
+    for (let t = 1; t < stats.tradeHistory.length; t += 2) {
+      const buyTrade = stats.tradeHistory[t - 1];
+      const sellTrade = stats.tradeHistory[t];
+      if (!buyTrade || !sellTrade) continue;
+
+      const pnl = sellTrade.price - buyTrade.price;
+      const isLoss = pnl < 0;
+
+      const entryTime = buyTrade.time;
+      const entryIdx = candles.findIndex((c) => c.time === entryTime);
+      if (entryIdx === -1) continue;
+
+      if (isLoss) {
+        // LONG trade was a loss -> reduce weights of indicators that were bullish (gave false signals)
+        if (!isNaN(rsiV[entryIdx]) && rsiV[entryIdx] < os) {
+          updatedWeights.rsi = Math.max(0.1, updatedWeights.rsi * 0.90);
+        }
+        if (!isNaN(emaF[entryIdx]) && !isNaN(emaS[entryIdx]) && emaF[entryIdx] > emaS[entryIdx]) {
+          updatedWeights.ema = Math.max(0.1, updatedWeights.ema * 0.90);
+        }
+        if (!isNaN(bbU[entryIdx]) && !isNaN(bbL[entryIdx]) && prices[entryIdx] < bbL[entryIdx]) {
+          updatedWeights.bb = Math.max(0.1, updatedWeights.bb * 0.90);
+        }
+        if (!isNaN(hist[entryIdx]) && hist[entryIdx] > 0) {
+          updatedWeights.macd = Math.max(0.1, updatedWeights.macd * 0.90);
+        }
+        if (entryIdx > 0) {
+          const ha = haCandles[entryIdx];
+          if (ha.close > ha.open && ha.open <= ha.low + (ha.high - ha.low) * 0.01) {
+            updatedWeights.ha = Math.max(0.1, updatedWeights.ha * 0.90);
+          }
+        }
+        if (!isNaN(tS[entryIdx]) && !isNaN(kS[entryIdx]) && tS[entryIdx] > kS[entryIdx]) {
+          updatedWeights.ichiCross = Math.max(0.1, updatedWeights.ichiCross * 0.90);
+        }
+        if (!isNaN(sA[entryIdx]) && !isNaN(sB[entryIdx]) && prices[entryIdx] > sA[entryIdx] && prices[entryIdx] > sB[entryIdx]) {
+          updatedWeights.ichiCloud = Math.max(0.1, updatedWeights.ichiCloud * 0.90);
+        }
+      } else {
+        // LONG trade was profitable -> reward indicators that correctly predicted it
+        if (!isNaN(rsiV[entryIdx]) && rsiV[entryIdx] < os) {
+          updatedWeights.rsi = Math.min(3.0, updatedWeights.rsi * 1.05);
+        }
+        if (!isNaN(emaF[entryIdx]) && !isNaN(emaS[entryIdx]) && emaF[entryIdx] > emaS[entryIdx]) {
+          updatedWeights.ema = Math.min(3.0, updatedWeights.ema * 1.05);
+        }
+        if (!isNaN(bbU[entryIdx]) && !isNaN(bbL[entryIdx]) && prices[entryIdx] < bbL[entryIdx]) {
+          updatedWeights.bb = Math.min(3.0, updatedWeights.bb * 1.05);
+        }
+        if (!isNaN(hist[entryIdx]) && hist[entryIdx] > 0) {
+          updatedWeights.macd = Math.min(3.0, updatedWeights.macd * 1.05);
+        }
+        if (entryIdx > 0) {
+          const ha = haCandles[entryIdx];
+          if (ha.close > ha.open && ha.open <= ha.low + (ha.high - ha.low) * 0.01) {
+            updatedWeights.ha = Math.min(3.0, updatedWeights.ha * 1.05);
+          }
+        }
+        if (!isNaN(tS[entryIdx]) && !isNaN(kS[entryIdx]) && tS[entryIdx] > kS[entryIdx]) {
+          updatedWeights.ichiCross = Math.min(3.0, updatedWeights.ichiCross * 1.05);
+        }
+        if (!isNaN(sA[entryIdx]) && !isNaN(sB[entryIdx]) && prices[entryIdx] > sA[entryIdx] && prices[entryIdx] > sB[entryIdx]) {
+          updatedWeights.ichiCloud = Math.min(3.0, updatedWeights.ichiCloud * 1.05);
+        }
+      }
+    }
+    return updatedWeights;
+  };
+
   // Run initial evaluation
   let bestTrainedStats = evaluateAgent(
     currentOS, currentOB, currentEmaFast, currentEmaSlow,
     currentBbPeriod, currentBbMult, currentMacdFast, currentMacdSlow, currentMacdSignal,
     currentTenkan, currentKijun, currentSenkouB,
-    currentBuyThreshold, currentSellThreshold, currentTrailingMult
+    currentBuyThreshold, currentSellThreshold, currentTrailingMult,
+    wRsi, wEma, wBb, wMacd, wHa, wIchiCross, wIchiCloud
   );
   let bestTrainedProfit = bestTrainedStats.netProfit;
 
@@ -991,11 +1093,36 @@ export function runBacktest(
     const tempSellT = mutateParam(currentSellThreshold, -5, -1, 1);
     const tempTrailingM = mutateParam(currentTrailingMult, 1.0, 4.0, 0.1);
 
+    let tempWeights = { rsi: wRsi, ema: wEma, bb: wBb, macd: wMacd, ha: wHa, ichiCross: wIchiCross, ichiCloud: wIchiCloud };
+
+    // Periodically run Self-Correction feedback loop on the current best parameters
+    if (g > 0 && g % 10 === 0) {
+      tempWeights = runSelfCorrectionFeedbackLoop(
+        currentOS, currentOB, currentEmaFast, currentEmaSlow,
+        currentBbPeriod, currentBbMult, currentMacdFast, currentMacdSlow, currentMacdSignal,
+        currentTenkan, currentKijun, currentSenkouB,
+        currentBuyThreshold, currentSellThreshold, currentTrailingMult,
+        { rsi: wRsi, ema: wEma, bb: wBb, macd: wMacd, ha: wHa, ichiCross: wIchiCross, ichiCloud: wIchiCloud }
+      );
+    } else {
+      // Mutate weights slightly in search space
+      tempWeights = {
+        rsi: mutateParam(wRsi, 0.2, 3.0, 0.05),
+        ema: mutateParam(wEma, 0.2, 3.0, 0.05),
+        bb: mutateParam(wBb, 0.2, 3.0, 0.05),
+        macd: mutateParam(wMacd, 0.2, 3.0, 0.05),
+        ha: mutateParam(wHa, 0.2, 3.0, 0.05),
+        ichiCross: mutateParam(wIchiCross, 0.2, 3.0, 0.05),
+        ichiCloud: mutateParam(wIchiCloud, 0.2, 3.0, 0.05),
+      };
+    }
+
     const stats = evaluateAgent(
       tempOS, tempOB, tempFast, tempSlow,
       tempBbP, tempBbM, tempMFast, tempMSlow, tempMSig,
       tempTenkan, tempKijun, tempSenkouB,
-      tempBuyT, tempSellT, tempTrailingM
+      tempBuyT, tempSellT, tempTrailingM,
+      tempWeights.rsi, tempWeights.ema, tempWeights.bb, tempWeights.macd, tempWeights.ha, tempWeights.ichiCross, tempWeights.ichiCloud
     );
 
     if (stats.netProfit > bestTrainedProfit && stats.totalTrades > 0) {
@@ -1016,6 +1143,13 @@ export function runBacktest(
       currentBuyThreshold = tempBuyT;
       currentSellThreshold = tempSellT;
       currentTrailingMult = tempTrailingM;
+      wRsi = tempWeights.rsi;
+      wEma = tempWeights.ema;
+      wBb = tempWeights.bb;
+      wMacd = tempWeights.macd;
+      wHa = tempWeights.ha;
+      wIchiCross = tempWeights.ichiCross;
+      wIchiCloud = tempWeights.ichiCloud;
     }
   }
 
@@ -1044,34 +1178,34 @@ export function runBacktest(
 
   let currentScore = 0;
   if (!isNaN(finalRsi)) {
-    if (finalRsi < currentOS) currentScore += 1;
-    if (finalRsi > currentOB) currentScore -= 1;
+    if (finalRsi < currentOS) currentScore += wRsi;
+    if (finalRsi > currentOB) currentScore -= wRsi;
   }
   if (!isNaN(finalFast) && !isNaN(finalSlow)) {
-    if (finalFast > finalSlow) currentScore += 1;
-    else currentScore -= 1;
+    if (finalFast > finalSlow) currentScore += wEma;
+    else currentScore -= wEma;
   }
   if (!isNaN(finalUpper[finalUpper.length - 1]) && !isNaN(finalLower[finalLower.length - 1])) {
-    if (currentPrice < finalLower[finalLower.length - 1]) currentScore += 1;
-    if (currentPrice > finalUpper[finalUpper.length - 1]) currentScore -= 1;
+    if (currentPrice < finalLower[finalLower.length - 1]) currentScore += wBb;
+    if (currentPrice > finalUpper[finalUpper.length - 1]) currentScore -= wBb;
   }
   if (!isNaN(lastHist)) {
-    if (lastHist > 0) currentScore += 1;
-    else currentScore -= 1;
+    if (lastHist > 0) currentScore += wMacd;
+    else currentScore -= wMacd;
   }
   // Heikin Ashi final score
   if (finalHA.close > finalHA.open && finalHA.open <= finalHA.low + (finalHA.high - finalHA.low) * 0.01) {
-    currentScore += 1;
+    currentScore += wHa;
   } else if (finalHA.close < finalHA.open && finalHA.open >= finalHA.high - (finalHA.high - finalHA.low) * 0.01) {
-    currentScore -= 1;
+    currentScore -= wHa;
   }
   // Ichimoku final score
   if (!isNaN(lastTenkan) && !isNaN(lastKijun) && !isNaN(lastSpanA) && !isNaN(lastSpanB)) {
-    if (lastTenkan > lastKijun) currentScore += 1;
-    else currentScore -= 1;
+    if (lastTenkan > lastKijun) currentScore += wIchiCross;
+    else currentScore -= wIchiCross;
 
-    if (currentPrice > lastSpanA && currentPrice > lastSpanB) currentScore += 1;
-    else if (currentPrice < lastSpanA && currentPrice < lastSpanB) currentScore -= 1;
+    if (currentPrice > lastSpanA && currentPrice > lastSpanB) currentScore += wIchiCloud;
+    else if (currentPrice < lastSpanA && currentPrice < lastSpanB) currentScore -= wIchiCloud;
   }
 
   const finalSignal = currentScore >= currentBuyThreshold ? "BUY" : (currentScore <= currentSellThreshold ? "SELL" : "NEUTRAL");
@@ -1124,6 +1258,13 @@ export function runBacktest(
       Kijun_Deger: !isNaN(lastKijun) ? Math.round(lastKijun * 100) / 100 : 0,
       SenkouA_Deger: !isNaN(lastSpanA) ? Math.round(lastSpanA * 100) / 100 : 0,
       SenkouB_Deger: !isNaN(lastSpanB) ? Math.round(lastSpanB * 100) / 100 : 0,
+      Agirlik_RSI: Math.round(wRsi * 100) / 100,
+      Agirlik_EMA: Math.round(wEma * 100) / 100,
+      Agirlik_Bollinger: Math.round(wBb * 100) / 100,
+      Agirlik_MACD: Math.round(wMacd * 100) / 100,
+      Agirlik_HeikenAshi: Math.round(wHa * 100) / 100,
+      Agirlik_IchiKesisim: Math.round(wIchiCross * 100) / 100,
+      Agirlik_IchiBulut: Math.round(wIchiCloud * 100) / 100,
     },
     stopLoss: trainedStopLoss,
     takeProfit: trainedTakeProfit,
