@@ -165,7 +165,7 @@ export default function CryptoDashboard() {
         <div className="flex-column" style={{ gap: "1.5rem" }}>
           {/* Chart Section */}
           <div className="glass-panel" style={{ padding: "1rem" }}>
-            <div className="flex-row-between" style={{ marginBottom: "1rem", padding: "0 0.5rem" }}>
+            <div className="chart-header-row" style={{ marginBottom: "1rem", padding: "0 0.5rem" }}>
               <h3
                 style={{
                   fontSize: "1.1rem",

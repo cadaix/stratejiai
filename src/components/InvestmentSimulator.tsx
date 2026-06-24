@@ -173,7 +173,7 @@ export default function InvestmentSimulator({ results, symbol }: InvestmentSimul
           >
             En İyi Strateji ({bestSim.strategyName}) ile
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+          <div className="simulator-result-flow">
             <div>
               <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
                 Başlangıç
@@ -182,7 +182,7 @@ export default function InvestmentSimulator({ results, symbol }: InvestmentSimul
                 {formatCurrency(investmentAmount)}
               </div>
             </div>
-            <div style={{ fontSize: "1.5rem", color: "var(--text-muted)" }}>→</div>
+            <div className="flow-arrow" style={{ fontSize: "1.5rem", color: "var(--text-muted)" }}>→</div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
                 Sonuç

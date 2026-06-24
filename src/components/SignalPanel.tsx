@@ -374,7 +374,7 @@ export default function SignalPanel({
             />
           </div>
 
-          <div style={{ display: "flex", gap: "0.5rem" }}>
+          <div className="telegram-actions-container">
             <button
               onClick={() => handleTelegramTest(true)}
               disabled={tgStatus === "loading" || isLoading}
