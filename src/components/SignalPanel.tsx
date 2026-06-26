@@ -105,7 +105,7 @@ export default function SignalPanel({
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-      minimumFractionDigits: symbol.toLowerCase().includes("btc") ? 2 : 4,
+      minimumFractionDigits: (symbol.toLowerCase().includes("btc") || symbol.toLowerCase().includes("paxg")) ? 2 : 4,
     }).format(val);
   };
 
@@ -151,7 +151,7 @@ export default function SignalPanel({
         <div className="flex-column" style={{ gap: "1.25rem" }}>
           <div className="flex-row-between">
             <span style={{ fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: 500 }}>
-              {symbol} &bull; {timeFrameLabels[timeframe] || timeframe}
+              {symbol === "PAXG/USDT" ? "ONS/USDT" : symbol} &bull; {timeFrameLabels[timeframe] || timeframe}
             </span>
             <div className="timer-badge">
               <div className="pulse-dot" />

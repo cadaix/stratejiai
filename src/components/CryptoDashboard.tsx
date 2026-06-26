@@ -13,6 +13,7 @@ import LeverageBacktestPanel from "./LeverageBacktestPanel";
 const SYMBOLS = [
   "BTC/USDT",
   "SOL/USDT",
+  "PAXG/USDT",
 ];
 const TIMEFRAMES = ["15m", "1h", "4h", "1d", "1w", "1M", "1y", "5y"];
 
@@ -110,7 +111,7 @@ export default function CryptoDashboard() {
                   style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem" }}
                   onClick={() => setSelectedSymbol(sym)}
                 >
-                  {sym.replace("/USDT", "")}
+                  {sym === "PAXG/USDT" ? "ONS" : sym.replace("/USDT", "")}
                 </button>
               ))}
             </div>
@@ -325,7 +326,7 @@ export default function CryptoDashboard() {
                 className={`tab-btn ${selectedSymbol === sym ? "active" : ""}`}
                 onClick={() => setSelectedSymbol(sym)}
               >
-                {sym.replace("/USDT", "")}
+                {sym === "PAXG/USDT" ? "ONS (Altın)" : sym.replace("/USDT", "")}
               </button>
             ))}
           </div>
